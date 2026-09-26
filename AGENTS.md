@@ -122,7 +122,12 @@ Core `Eto` project targets `netstandard2.0;net6.0;net8.0;net10.0`.
 Platform backends live in `src/Eto.<Platform>/` (Gtk, Mac, Wpf, WinForms, WinUI, iOS,
 Android, Direct2D). Solution: `src/Eto.slnx`.
 
-## Gtk preferred-size gotchas (non-obvious)
+## Gtk control gotchas (non-obvious)
+
+- **Mouse events bubble through `Gtk.Notebook`.** Preserve a focused descendant for bubbled
+  mouse events or a clicked TextArea loses keyboard focus. Check `Gtk.Global.GetEventWidget`
+  too: a direct click on the container must still be able to focus it. Programmatic `Focus()`
+  does not exercise this path.
 
 - **GTK returns a *stale* preferred size on the first size request after `ShowAll` on an
   unrealized/unmapped widget** (esp. `GtkTreeView`); the settled value only comes back on a
