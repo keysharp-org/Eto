@@ -774,7 +774,7 @@ namespace Eto.GtkSharp.Forms
 			set
 			{
 				icon = value;
-				Control.Icon = ((IconHandler)icon.Handler).Pixbuf;
+				Control.Icon = icon == null ? null : ((IconHandler)icon.Handler).Pixbuf;
 			}
 		}
 
