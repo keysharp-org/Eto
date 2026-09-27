@@ -87,7 +87,7 @@ namespace Eto.GtkSharp.Forms
 			
 			EnsureStatusNotifierWatcher();
 
-			Control = GLib.Object.GetObject(app_indicator_new(Assembly.GetExecutingAssembly().FullName + Id, "", 0));
+			Control = GLib.Object.GetObject(app_indicator_new(Assembly.GetExecutingAssembly().FullName + Id, "", 0), true);
 			app_indicator_set_menu(Control.Handle, (new Gtk.Menu()).Handle);
 
 			Id++;
@@ -178,11 +178,15 @@ namespace Eto.GtkSharp.Forms
 			set
 			{
 				RemoveTempImage();
-				imagePath = Path.GetTempFileName();
-
 				image = value;
-				image.ToGdk()?.Save(imagePath, "png");
+				if (image == null)
+				{
+					app_indicator_set_icon(Control.Handle, "");
+					return;
+				}
 
+				imagePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".png");
+				image.ToGdk()?.Save(imagePath, "png");
 				app_indicator_set_icon(Control.Handle, imagePath);
 				ApplicationHandler.TempFiles.Add(imagePath);
 			}
@@ -237,6 +241,10 @@ namespace Eto.GtkSharp.Forms
 
 		protected override void Dispose(bool disposing)
 		{
+			if (menu?.Handler is ContextMenuHandler handler)
+				handler.Changed -= ContextMenu_Changed;
+			menu = null;
+			image = null;
 			if (Control != null)
 			{
 				Visible = false;

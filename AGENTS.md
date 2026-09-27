@@ -124,6 +124,11 @@ Android, Direct2D). Solution: `src/Eto.slnx`.
 
 ## Gtk control gotchas (non-obvious)
 
+- `app_indicator_new` returns an owned, non-floating GObject reference. Pass `true` to
+  `GLib.Object.GetObject`; the default overload adds another reference and leaves the native
+  tray item exported after disposal. Never publish an empty temporary image while retiring an
+  indicator: hosts can display a fallback icon after its menu has gone away.
+
 - **Mouse events bubble through `Gtk.Notebook`.** Preserve a focused descendant for bubbled
   mouse events or a clicked TextArea loses keyboard focus. Check `Gtk.Global.GetEventWidget`
   too: a direct click on the container must still be able to focus it. Programmatic `Focus()`
