@@ -234,6 +234,8 @@ namespace Eto.GtkSharp.Forms
 		const int O_NONBLOCK = 0x800;
 		const short POLLIN = 0x001;
 		const short POLLOUT = 0x004;
+		const short POLLERR = 0x008;
+		const short POLLHUP = 0x010;
 		const int F_GETFL = 3;
 		const int F_SETFL = 4;
 		const int EAGAIN = 11;     // == EWOULDBLOCK on Linux
@@ -390,8 +392,10 @@ namespace Eto.GtkSharp.Forms
 					return false;
 				wl_proxy_add_listener(device, deviceVtable, IntPtr.Zero);
 
-				// second roundtrip: receive the initial selection offer
-				wl_display_roundtrip(display);
+				// second roundtrip: receive the initial selection offer. A failure here means the device's events broke
+				// the connection, and reporting the backend as available would leave a clipboard that never changes.
+				if (wl_display_roundtrip(display) < 0)
+					return false;
 
 				// dedicated dispatch thread + wakeup pipe for clean shutdown
 				wakePipe = new int[2];
@@ -424,10 +428,16 @@ namespace Eto.GtkSharp.Forms
 			{
 				int fd = wl_display_get_fd(display);
 				var pfds = new Pollfd[2];
+				// A fatal error leaves the display unreadable while its fd stays readable, so every failure below ends
+				// the loop instead of retrying; retrying would spin a core for the rest of the process.
 				while (running)
 				{
 					while (wl_display_prepare_read(display) != 0)
-						wl_display_dispatch_pending(display);
+						if (wl_display_dispatch_pending(display) < 0)
+						{
+							Debug.WriteLine("WaylandClipboard connection failed; clipboard changes are no longer tracked.");
+							return;
+						}
 					wl_display_flush(display);
 
 					pfds[0].fd = fd; pfds[0].events = POLLIN; pfds[0].revents = 0;
@@ -442,12 +452,20 @@ namespace Eto.GtkSharp.Forms
 
 					if ((pfds[0].revents & POLLIN) != 0)
 					{
-						wl_display_read_events(display);
-						wl_display_dispatch_pending(display);
+						if (wl_display_read_events(display) < 0 || wl_display_dispatch_pending(display) < 0)
+						{
+							Debug.WriteLine("WaylandClipboard connection failed; clipboard changes are no longer tracked.");
+							return;
+						}
 					}
 					else
 					{
 						wl_display_cancel_read(display);
+						if ((pfds[0].revents & (POLLERR | POLLHUP)) != 0)
+						{
+							Debug.WriteLine("WaylandClipboard connection closed; clipboard changes are no longer tracked.");
+							return;
+						}
 					}
 
 					if ((pfds[1].revents & POLLIN) != 0)
@@ -723,6 +741,17 @@ namespace Eto.GtkSharp.Forms
 				try { onSelectionChanged?.Invoke(); } catch { }
 			}
 
+			// Only the CLIPBOARD selection is tracked, so a primary-selection offer is released straight away rather
+			// than left pending until the next selection event sweeps it up.
+			void OnDevicePrimarySelection(IntPtr data, IntPtr dev, IntPtr offer)
+			{
+				lock (stateLock)
+				{
+					if (offer != IntPtr.Zero && pendingOffers.Remove(offer))
+						wl_proxy_marshal_array_flags(offer, 1, IntPtr.Zero, 0, WL_MARSHAL_FLAG_DESTROY, null);
+				}
+			}
+
 			void OnDeviceFinished(IntPtr data, IntPtr dev) { }
 
 			// Maximum time a single selection transfer may take before we give up. A consumer that stops
@@ -839,7 +868,8 @@ namespace Eto.GtkSharp.Forms
 				DeviceDataOffer ddo = OnDeviceDataOffer;
 				DeviceSelection ds = OnDeviceSelection;
 				DeviceFinished df = OnDeviceFinished;
-				deviceVtable = Vtable(ddo, ds, df);
+				DeviceSelection dps = OnDevicePrimarySelection;
+				deviceVtable = Vtable(ddo, ds, df, dps);
 
 				OfferOffer oo = OnOfferOffer;
 				offerVtable = Vtable(oo);
@@ -888,11 +918,14 @@ namespace Eto.GtkSharp.Forms
 					Msg("set_selection", "?o", ifSource),
 					Msg("destroy", "", null)
 				};
+				// primary_selection is in ext v1 and zwlr v2, and Hyprland sends it even to a v1 zwlr device. It has to
+				// be declared either way: libwayland treats an event missing from this table as a fatal protocol error.
 				var devEvents = new[]
 				{
 					Msg("data_offer", "n", ifOffer),
 					Msg("selection", "?o", ifOffer),
-					Msg("finished", "", null)
+					Msg("finished", "", null),
+					Msg("primary_selection", "?o", ifOffer)
 				};
 				FillInterface(ifDevice, p + "device_v1", 1, devMethods, devEvents);
 
