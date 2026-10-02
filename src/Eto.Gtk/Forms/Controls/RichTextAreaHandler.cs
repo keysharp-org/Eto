@@ -7,6 +7,7 @@ namespace Eto.GtkSharp.Forms.Controls
 	{
 		List<Gtk.TextTag> insertTags = new List<Gtk.TextTag>();
 		List<Gtk.TextTag> removeTags = new List<Gtk.TextTag>();
+		readonly Dictionary<string, List<Gtk.TextTag>> tagsByPrefix = new Dictionary<string, List<Gtk.TextTag>>();
 
 		const string WeightTagPrefix = "w-";
 		const string StyleTagPrefix = "s-";
@@ -24,7 +25,50 @@ namespace Eto.GtkSharp.Forms.Controls
 		{
 			base.Initialize();
 			Control.Buffer.InsertText += Connector.HandleInsertText;
+			Control.Buffer.TagTable.TagAdded += Connector.HandleTagAdded;
+			Control.Buffer.TagTable.TagRemoved += Connector.HandleTagRemoved;
 			Widget.SelectionChanged += HandleSelectionChanged;
+		}
+
+		List<Gtk.TextTag> GetTags(string prefix)
+		{
+			if (!tagsByPrefix.TryGetValue(prefix, out var tags))
+			{
+				tags = new List<Gtk.TextTag>();
+				Control.Buffer.TagTable.Foreach(tag =>
+				{
+					if (tag.Name != null && tag.Name.StartsWith(prefix, StringComparison.Ordinal))
+						tags.Add(tag);
+				});
+				tagsByPrefix.Add(prefix, tags);
+			}
+			return tags;
+		}
+
+		void UpdateTagCache(Gtk.TextTag tag, bool added)
+		{
+			foreach (var group in tagsByPrefix)
+			{
+				if (tag.Name == null || !tag.Name.StartsWith(group.Key, StringComparison.Ordinal))
+					continue;
+				if (added)
+					group.Value.Add(tag);
+				else
+					group.Value.Remove(tag);
+			}
+		}
+
+		Gtk.TextTag GetOrCreateTag(string prefix, string variation, Action<Gtk.TextTag> apply)
+		{
+			var tagName = prefix + variation;
+			var tag = Control.Buffer.TagTable.Lookup(tagName);
+			if (tag != null)
+				return tag;
+
+			tag = new Gtk.TextTag(tagName);
+			apply(tag);
+			Control.Buffer.TagTable.Add(tag);
+			return tag;
 		}
 
 		void HandleSelectionChanged(object sender, EventArgs e)
@@ -73,47 +117,29 @@ namespace Eto.GtkSharp.Forms.Controls
 			else
 			{
 				// nothing selected, set insertion formatting
-				buffer.TagTable.Foreach(t =>
+				foreach (var t in GetTags(prefix))
 				{
-					if (t.Name != null && t.Name != tagName && t.Name.StartsWith(prefix, StringComparison.Ordinal) && !removeTags.Contains(t))
+					if (t.Name != tagName && !removeTags.Contains(t))
 						removeTags.Add(t);
-				});
+				}
 				insertTags.RemoveAll(removeTags.Contains);
 				removeTags.RemoveAll(r => r.Name == tagName);
 
-				var tag = buffer.TagTable.Lookup(tagName);
-				if (tag == null)
-				{
-					tag = new Gtk.TextTag(tagName);
-					apply(tag);
-					buffer.TagTable.Add(tag);
-				}
-				insertTags.Add(tag);
+				var tag = GetOrCreateTag(prefix, variation, apply);
+				if (!insertTags.Contains(tag))
+					insertTags.Add(tag);
 			}
 		}
 
 		void ApplyTag(string prefix, string variation, Gtk.TextIter start, Gtk.TextIter end, Action<Gtk.TextTag> apply)
 		{
 			var buffer = Control.Buffer;
-			var tagName = prefix + variation;
-			var tagsToRemove = new List<Gtk.TextTag>();
-			buffer.TagTable.Foreach(t =>
-			{
-				if (t.Name != null && t.Name.StartsWith(prefix, StringComparison.Ordinal))
-					tagsToRemove.Add(t);
-			});
-			foreach (var removeTag in tagsToRemove)
+			foreach (var removeTag in GetTags(prefix))
 			{
 				buffer.RemoveTag(removeTag, start, end);
 			}
 
-			var tag = buffer.TagTable.Lookup(tagName);
-			if (tag == null)
-			{
-				tag = new Gtk.TextTag(tagName);
-				apply(tag);
-				buffer.TagTable.Add(tag);
-			}
+			var tag = GetOrCreateTag(prefix, variation, apply);
 			buffer.ApplyTag(tag, start, end);
 		}
 
@@ -170,7 +196,6 @@ namespace Eto.GtkSharp.Forms.Controls
 			});
 			SetUnderline(range, font.FontDecoration.HasFlag(FontDecoration.Underline));
 			SetStrikethrough(range, font.FontDecoration.HasFlag(FontDecoration.Strikethrough));
-			Callback.OnTextChanged(Widget, EventArgs.Empty);
 		}
 
 		public void SetFamily(Range<int> range, FontFamily family)
@@ -181,7 +206,6 @@ namespace Eto.GtkSharp.Forms.Controls
 				tag.Family = pangoFamily;
 				tag.FamilySet = true;
 			});
-			Callback.OnTextChanged(Widget, EventArgs.Empty);
 		}
 
 		public void SetTypeface(Range<int> range, FontTypeface typeface)
@@ -192,7 +216,6 @@ namespace Eto.GtkSharp.Forms.Controls
 				tag.Family = pangoFace.FaceName;
 				tag.FamilySet = true;
 			});
-			Callback.OnTextChanged(Widget, EventArgs.Empty);
 		}
 
 		public void SetForeground(Range<int> range, Color color)
@@ -202,7 +225,6 @@ namespace Eto.GtkSharp.Forms.Controls
 				tag.ForegroundGdk = color.ToGdk();
 				tag.ForegroundSet = true;
 			});
-			Callback.OnTextChanged(Widget, EventArgs.Empty);
 		}
 
 		public void SetBackground(Range<int> range, Color color)
@@ -212,7 +234,6 @@ namespace Eto.GtkSharp.Forms.Controls
 				tag.BackgroundGdk = color.ToGdk();
 				tag.BackgroundSet = true;
 			});
-			Callback.OnTextChanged(Widget, EventArgs.Empty);
 		}
 
 		public void SetBold(Range<int> range, bool bold)
@@ -223,7 +244,6 @@ namespace Eto.GtkSharp.Forms.Controls
 				tag.Weight = weight;
 				tag.WeightSet = true;
 			});
-			Callback.OnTextChanged(Widget, EventArgs.Empty);
 		}
 
 		public void SetItalic(Range<int> range, bool italic)
@@ -234,7 +254,6 @@ namespace Eto.GtkSharp.Forms.Controls
 				tag.Style = style;
 				tag.StyleSet = true;
 			});
-			Callback.OnTextChanged(Widget, EventArgs.Empty);
 		}
 
 		public void SetUnderline(Range<int> range, bool underline)
@@ -244,7 +263,6 @@ namespace Eto.GtkSharp.Forms.Controls
 				tag.Underline = underline ? Pango.Underline.Single : Pango.Underline.None;
 				tag.UnderlineSet = true;
 			});
-			Callback.OnTextChanged(Widget, EventArgs.Empty);
 		}
 
 		public void SetStrikethrough(Range<int> range, bool strikethrough)
@@ -254,7 +272,6 @@ namespace Eto.GtkSharp.Forms.Controls
 				tag.Strikethrough = strikethrough;
 				tag.StrikethroughSet = true;
 			});
-			Callback.OnTextChanged(Widget, EventArgs.Empty);
 		}
 
 		Gtk.TextIter SelectionIter
@@ -364,7 +381,6 @@ namespace Eto.GtkSharp.Forms.Controls
 					tag.StrikethroughSet = true;
 				});
 
-				Callback.OnTextChanged(Widget, EventArgs.Empty);
 			}
 		}
 
@@ -386,7 +402,6 @@ namespace Eto.GtkSharp.Forms.Controls
 					tag.ForegroundGdk = value.ToGdk();
 					tag.ForegroundSet = true;
 				});
-				Callback.OnTextChanged(Widget, EventArgs.Empty);
 			}
 		}
 
@@ -408,7 +423,6 @@ namespace Eto.GtkSharp.Forms.Controls
 					tag.BackgroundGdk = value.ToGdk();
 					tag.BackgroundSet = true;
 				});
-				Callback.OnTextChanged(Widget, EventArgs.Empty);
 			}
 		}
 
@@ -426,7 +440,6 @@ namespace Eto.GtkSharp.Forms.Controls
 					tag.Weight = weight;
 					tag.WeightSet = true;
 				});
-				Callback.OnTextChanged(Widget, EventArgs.Empty);
 			}
 		}
 
@@ -444,7 +457,6 @@ namespace Eto.GtkSharp.Forms.Controls
 					tag.Style = style;
 					tag.StyleSet = true;
 				});
-				Callback.OnTextChanged(Widget, EventArgs.Empty);
 			}
 		}
 
@@ -458,7 +470,6 @@ namespace Eto.GtkSharp.Forms.Controls
 					tag.Underline = value ? Pango.Underline.Single : Pango.Underline.None;
 					tag.UnderlineSet = true;
 				});
-				Callback.OnTextChanged(Widget, EventArgs.Empty);
 			}
 		}
 
@@ -472,7 +483,6 @@ namespace Eto.GtkSharp.Forms.Controls
 					tag.Strikethrough = value;
 					tag.StrikethroughSet = true;
 				});
-				Callback.OnTextChanged(Widget, EventArgs.Empty);
 			}
 		}
 
@@ -496,7 +506,6 @@ namespace Eto.GtkSharp.Forms.Controls
 					tag.Family = pangoFamily;
 					tag.FamilySet = true;
 				});
-				Callback.OnTextChanged(Widget, EventArgs.Empty);
 			}
 		}
 
@@ -528,7 +537,6 @@ namespace Eto.GtkSharp.Forms.Controls
 					tag.Stretch = pangoDesc.Stretch;
 					tag.StretchSet = true;
 				});
-				Callback.OnTextChanged(Widget, EventArgs.Empty);
 			}
 		}
 
@@ -603,6 +611,10 @@ namespace Eto.GtkSharp.Forms.Controls
 			public new RichTextAreaHandler Handler => (RichTextAreaHandler)base.Handler;
 
 			public virtual void HandleInsertText(object o, InsertTextArgs args) => Handler?.HandleInsertText(o, args);
+
+			public void HandleTagAdded(object sender, TagAddedArgs args) => Handler?.UpdateTagCache(args.Tag, true);
+
+			public void HandleTagRemoved(object sender, TagRemovedArgs args) => Handler?.UpdateTagCache(args.Tag, false);
 		}
 	}
 }

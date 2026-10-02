@@ -20,10 +20,31 @@ namespace Eto.Mac.Forms.Controls
 		public void SetFont(Range<int> range, Font font)
 		{
 			var nsrange = range.ToNS();
-			Control.SetFont(font.ToNS(), nsrange);
-			var attr = font.Attributes();
-			if (attr != null && attr.Count > 0)
-				Control.TextStorage.AddAttributes(attr, nsrange);
+			Control.TextStorage.BeginEditing();
+			try
+			{
+				Control.SetFont(font.ToNS(), nsrange);
+				var attr = font.Attributes();
+				if (attr != null && attr.Count > 0)
+					Control.TextStorage.AddAttributes(attr, nsrange);
+			}
+			finally
+			{
+				Control.TextStorage.EndEditing();
+			}
+		}
+
+		void SetAttribute(NSString attribute, NSObject value, NSRange range)
+		{
+			Control.TextStorage.BeginEditing();
+			try
+			{
+				Control.TextStorage.AddAttribute(attribute, value, range);
+			}
+			finally
+			{
+				Control.TextStorage.EndEditing();
+			}
 		}
 
 		public void SetFamily(Range<int> range, FontFamily family)
@@ -40,12 +61,12 @@ namespace Eto.Mac.Forms.Controls
 
 		public void SetForeground(Range<int> range, Color color)
 		{
-			Control.TextStorage.AddAttribute(NSStringAttributeKey.ForegroundColor, color.ToNSUI(), range.ToNS());
+			SetAttribute(NSStringAttributeKey.ForegroundColor, color.ToNSUI(), range.ToNS());
 		}
 
 		public void SetBackground(Range<int> range, Color color)
 		{
-			Control.TextStorage.AddAttribute(NSStringAttributeKey.BackgroundColor, color.ToNSUI(), range.ToNS());
+			SetAttribute(NSStringAttributeKey.BackgroundColor, color.ToNSUI(), range.ToNS());
 		}
 
 		public void SetBold(Range<int> range, bool bold)
@@ -60,12 +81,12 @@ namespace Eto.Mac.Forms.Controls
 
 		public void SetUnderline(Range<int> range, bool underline)
 		{
-			Control.TextStorage.AddAttribute(NSStringAttributeKey.UnderlineStyle, new NSNumber((int)(underline ? NSUnderlineStyle.Single : NSUnderlineStyle.None)), range.ToNS());
+			SetAttribute(NSStringAttributeKey.UnderlineStyle, new NSNumber((int)(underline ? NSUnderlineStyle.Single : NSUnderlineStyle.None)), range.ToNS());
 		}
 
 		public void SetStrikethrough(Range<int> range, bool strikethrough)
 		{
-			Control.TextStorage.AddAttribute(NSStringAttributeKey.StrikethroughStyle, new NSNumber((int)(strikethrough ? NSUnderlineStyle.Single : NSUnderlineStyle.None)), range.ToNS());
+			SetAttribute(NSStringAttributeKey.StrikethroughStyle, new NSNumber((int)(strikethrough ? NSUnderlineStyle.Single : NSUnderlineStyle.None)), range.ToNS());
 		}
 
 		bool HasFontAttribute(NSFontTraitMask traitMask)
@@ -104,7 +125,7 @@ namespace Eto.Mac.Forms.Controls
 			var range = Control.SelectedRange;
 			if (range.Length > 0)
 			{
-				Control.TextStorage.AddAttribute(attribute, value, range);
+				SetAttribute(attribute, value, range);
 				Control.DidChangeText();
 			}
 			else
@@ -126,20 +147,24 @@ namespace Eto.Mac.Forms.Controls
 			if (Control.ShouldChangeTextNew(range, null))
 			{
 				Control.TextStorage.BeginEditing();
-				var current = range;
-				var left = current.Length;
-				while (left > 0)
+				try
 				{
-					var attribs = Control.TextStorage.GetAttributes(current.Location, out effectiveRange, current);
-					attribs = UpdateFontAttributes(attribs, enabled, updateFont);
-					var span = effectiveRange.Location + effectiveRange.Length - current.Location;
-					var newRange = new NSRange(current.Location, (nint)Math.Min(span, current.Length));
-					Control.TextStorage.AddAttributes(attribs, newRange);
-					current.Location += span;
-					current.Length -= span;
-					left -= span;
+					var current = range;
+					while (current.Length > 0)
+					{
+						var attribs = Control.TextStorage.GetAttributes(current.Location, out effectiveRange, current);
+						attribs = UpdateFontAttributes(attribs, enabled, updateFont);
+						var span = effectiveRange.Location + effectiveRange.Length - current.Location;
+						var newRange = new NSRange(current.Location, (nint)Math.Min(span, current.Length));
+						Control.TextStorage.AddAttributes(attribs, newRange);
+						current.Location += newRange.Length;
+						current.Length -= newRange.Length;
+					}
 				}
-				Control.TextStorage.EndEditing();
+				finally
+				{
+					Control.TextStorage.EndEditing();
+				}
 				Control.DidChangeText();
 			}
 		}

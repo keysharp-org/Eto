@@ -500,9 +500,10 @@ namespace Eto.Test.UnitTests.Forms.Controls
 
 		[Test]
 		[InvokeOnUI]
-		public void SelectionBoldItalicUnderlineShouldTriggerTextChanged()
+		public void SelectionFormattingNotifications()
 		{
 			int textChangedCount = 0;
+			int formattingChanges = Platform.Instance.IsGtk ? 0 : 1;
 			var richText = new RichTextArea();
 			richText.TextChanged += (sender, e) => textChangedCount++;
 
@@ -513,7 +514,7 @@ namespace Eto.Test.UnitTests.Forms.Controls
 
 			richText.Selection = GetRange(text, "underline");
 			richText.SelectionUnderline = true;
-			Assert.That(textChangedCount, Is.EqualTo(2), "RichTextArea.TextChanged did not fire when setting SelectionUnderline");
+			Assert.That(textChangedCount, Is.EqualTo(1 + formattingChanges), "SelectionUnderline notification count");
 			Assert.That(richText.SelectionUnderline, Is.EqualTo(true));
 			Assert.That(richText.SelectionStrikethrough, Is.EqualTo(false));
 			Assert.That(richText.SelectionBold, Is.EqualTo(false));
@@ -521,7 +522,7 @@ namespace Eto.Test.UnitTests.Forms.Controls
 
 			richText.Selection = GetRange(text, "strikethrough");
 			richText.SelectionStrikethrough = true;
-			Assert.That(textChangedCount, Is.EqualTo(3), "RichTextArea.TextChanged did not fire when setting SelectionStrikethrough");
+			Assert.That(textChangedCount, Is.EqualTo(1 + 2 * formattingChanges), "SelectionStrikethrough notification count");
 			Assert.That(richText.SelectionUnderline, Is.EqualTo(false));
 			Assert.That(richText.SelectionStrikethrough, Is.EqualTo(true));
 			Assert.That(richText.SelectionBold, Is.EqualTo(false));
@@ -529,7 +530,7 @@ namespace Eto.Test.UnitTests.Forms.Controls
 
 			richText.Selection = GetRange(text, "bold");
 			richText.SelectionBold = true;
-			Assert.That(textChangedCount, Is.EqualTo(4), "RichTextArea.TextChanged did not fire when setting SelectionBold");
+			Assert.That(textChangedCount, Is.EqualTo(1 + 3 * formattingChanges), "SelectionBold notification count");
 			Assert.That(richText.SelectionUnderline, Is.EqualTo(false));
 			Assert.That(richText.SelectionStrikethrough, Is.EqualTo(false));
 			Assert.That(richText.SelectionBold, Is.EqualTo(true));
@@ -537,7 +538,7 @@ namespace Eto.Test.UnitTests.Forms.Controls
 
 			richText.Selection = GetRange(text, "italic");
 			richText.SelectionItalic = true;
-			Assert.That(textChangedCount, Is.EqualTo(5), "RichTextArea.TextChanged did not fire when setting SelectionItalic");
+			Assert.That(textChangedCount, Is.EqualTo(1 + 4 * formattingChanges), "SelectionItalic notification count");
 			Assert.That(richText.SelectionUnderline, Is.EqualTo(false));
 			Assert.That(richText.SelectionStrikethrough, Is.EqualTo(false));
 			Assert.That(richText.SelectionBold, Is.EqualTo(false));
@@ -545,13 +546,57 @@ namespace Eto.Test.UnitTests.Forms.Controls
 
 			richText.Selection = GetRange(text, "green");
 			richText.SelectionForeground = Colors.Green;
-			Assert.That(textChangedCount, Is.EqualTo(6), "RichTextArea.TextChanged did not fire when setting SelectionForeground");
+			Assert.That(textChangedCount, Is.EqualTo(1 + 5 * formattingChanges), "SelectionForeground notification count");
 			Assert.That(richText.SelectionForeground, Is.EqualTo(Colors.Green));
 
 			richText.Selection = GetRange(text, "green");
 			richText.SelectionBackground = Colors.Blue;
-			Assert.That(textChangedCount, Is.EqualTo(7), "RichTextArea.TextChanged did not fire when setting SelectionBackground");
+			Assert.That(textChangedCount, Is.EqualTo(1 + 6 * formattingChanges), "SelectionBackground notification count");
 			Assert.That(richText.SelectionBackground, Is.EqualTo(Colors.Blue));
+		}
+
+		[Test]
+		[InvokeOnUI]
+		public void GtkFormattingPreservesContentNotifications()
+		{
+			if (!Platform.Instance.IsGtk)
+				Assert.Ignore("Gtk formatting has content-only notifications.");
+
+			var richText = new RichTextArea { Text = "first second" };
+			var changes = 0;
+			richText.TextChanged += (_, _) => changes++;
+			var first = Range.FromLength(0, 5);
+			var second = Range.FromLength(6, 6);
+			richText.Buffer.SetForeground(first, Colors.Red);
+			richText.Buffer.SetForeground(second, Colors.Blue);
+			richText.Buffer.SetForeground(first, Colors.Green);
+			richText.Buffer.SetForeground(second, Colors.Red);
+			richText.Buffer.SetBackground(first, Colors.Yellow);
+			richText.Buffer.SetFont(first, Fonts.Sans(14));
+			richText.Buffer.SetUnderline(second, true);
+			Assert.That(changes, Is.Zero, "Range formatting does not change the text.");
+			Assert.That(richText.Text, Is.EqualTo("first second"));
+			richText.Selection = first;
+			Assert.That(richText.SelectionForeground, Is.EqualTo(Colors.Green));
+			richText.Selection = second;
+			Assert.That(richText.SelectionForeground, Is.EqualTo(Colors.Red));
+
+			richText.Text = "FIRST SECOND";
+			Assert.That(changes, Is.EqualTo(1), "A same-length text replacement is an edit.");
+			richText.Buffer.SetForeground(first, Colors.Blue);
+			Assert.That(changes, Is.EqualTo(1));
+			richText.Selection = Range.FromLength(richText.TextLength, 0);
+			richText.SelectionForeground = Colors.Purple;
+			Assert.That(changes, Is.EqualTo(1), "Insertion formatting does not change the text.");
+			richText.Buffer.Insert(richText.TextLength, "!");
+			Assert.That(changes, Is.GreaterThan(1), "An insertion remains an edit.");
+			Assert.That(richText.Text, Is.EqualTo("FIRST SECOND!"));
+			richText.Selection = Range.FromLength(richText.TextLength - 1, 1);
+			Assert.That(richText.SelectionForeground, Is.EqualTo(Colors.Purple));
+			var beforeDelete = changes;
+			richText.Buffer.Delete(Range.FromLength(richText.TextLength - 1, 1));
+			Assert.That(changes, Is.GreaterThan(beforeDelete), "A deletion remains an edit.");
+			Assert.That(richText.Text, Is.EqualTo("FIRST SECOND"));
 		}
 
 		[TestCase(true)]

@@ -158,6 +158,10 @@ public interface ITextBuffer
 /// <summary>
 /// Text area with ability to specify rich text formatting such as font attributes and colors.
 /// </summary>
+/// <remarks>
+/// On Gtk, formatting changes do not raise <see cref="TextControl.TextChanged"/>. Text replacement, insertion and deletion still do.
+/// Other platforms may report rich-text formatting changes through that event.
+/// </remarks>
 [Handler(typeof(IHandler))]
 public class RichTextArea : TextArea
 {
