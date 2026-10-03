@@ -3,10 +3,12 @@
 Eto.Forms cross-platform UI toolkit. Keep this file compact — it loads every
 session. Record only durable, non-obvious Eto facts; skip anything obvious from code/git.
 
-**Standing instruction:** whenever you discover a non-obvious fact about this repo — a
-build/test broke for a surprising reason, an undocumented quirk/flag/path/ordering, or
-something behaved unexpectedly — record it here immediately in the right section. Curate:
-merge into existing entries and fix stale ones rather than appending near-duplicates.
+**AGENTS.md admission rule:** add a fact only when it is broadly useful across future tasks,
+stable, genuinely difficult or costly to rediscover, and not better captured by code, tests,
+comments, or focused documentation. Do not record machine-specific state, one-off failures,
+routine implementation details, or facts already evident from the repository. When in doubt,
+do not add it. Curate existing entries and remove stale or low-value notes to justify the token
+cost this file imposes on every request.
 
 ## Running unit tests
 
@@ -16,14 +18,45 @@ dotnet test --project test/Eto.Test.UnitTests/Eto.Test.UnitTests.csproj -f net10
 
 - `--filter` uses NUnit / Microsoft.Testing.Platform syntax; a bare class name (`"BrushTests"`)
   or `FullyQualifiedName~Brush` both work. Omit `--filter` to run everything.
-- **Always exclude the `ManualTest` category** when running broader/unscoped test sets — those
-  tests require user interaction and will otherwise stall waiting for input. Append
-  `TestCategory!=ManualTest` (combine with `&`), e.g.
-  `--filter "FullyQualifiedName~Grid&TestCategory!=ManualTest"` or, to run everything else,
-  `--filter "TestCategory!=ManualTest"`.
-- **Always pass `-f`** — the project multi-targets `net48;net10.0;net10.0-windows`.
-  On Linux/macOS use `-f net10.0`; the Windows-only TFMs won't build there.
+- **Always exclude the `ManualTest` category — on every run, not just unscoped ones.** They put a
+  window on the user's screen and block indefinitely (`ManualForm` waits with `timeout: -1`) until a
+  human performs the interaction and clicks Pass/Fail — several are slow and fiddly to do by hand.
+  Running them unasked hijacks the user's machine, and whatever they report is about whether the
+  person carried out the steps, *not* whether the code works: they surface as **failures**, not
+  skips, so they masquerade as real breakage and poison a before/after comparison.
+  `--filter "FullyQualifiedName~Grid&TestCategory!=ManualTest"`, or `--filter "TestCategory!=ManualTest"`
+  to run everything else.
+- **Repeat the exclusion in every `|` alternative.** `&` binds tighter than `|`, so
+  `FullyQualifiedName~CheckBox|FullyQualifiedName~RadioButton&TestCategory!=ManualTest` still runs every
+  manual `CheckBox` test. Parentheses would group it, but the macos TFM parses its own filter and treats
+  them as literal characters — silently matching nothing — so repeat the term instead:
+  `"FullyQualifiedName~CheckBox&TestCategory!=ManualTest|FullyQualifiedName~RadioButton&TestCategory!=ManualTest"`.
+- **Always pass `-f`** — the project multi-targets `net48;net10.0;net10.0-windows` (plus
+  `net10.0-macos` on a Mac). On Linux use `-f net10.0`; the Windows-only TFMs won't build there.
 - Test runner is Microsoft.Testing.Platform (set in `global.json`), NUnit 4.
+- **The modern Mac-specific tests are in `test/Eto.Test.Mac/Eto.Test.macOS.csproj` and require
+  the matching .NET macOS workload.** The presence of `Microsoft.macOS.Ref` packs alone is not
+  sufficient. If the workload rejects a newer Xcode patch version, set
+  `<ValidateXcodeVersion>false</ValidateXcodeVersion>` (already set in `build/Common.Build.props`).
+- **On a Mac, `-f net10.0-macos` runs the tests against the modern .NET macOS backend**
+  (`Eto.macOS`/`Eto.Test.macOS`), `-f net10.0` against MonoMac (`Eto.Mac64`). The macos TFM builds the
+  runner as a real `.app` and has to: the bundle's native launcher is what initializes ObjCRuntime, so a
+  bundle-less build (`_CanOutputAppBundle=false`) produces an executable that dies in
+  `Runtime.EnsureInitialized` before reaching `Main`. `RunWithOpen=false` makes `dotnet test` run the
+  executable inside the bundle rather than `open`ing the app, which would detach it from the test host.
+- **NUnit3TestAdapter's testing-platform bridge can't run tests from an app bundle**, so the macos TFM
+  doesn't use it: the NUnit engine's driver builds an `AssemblyDependencyResolver` per test assembly,
+  which needs hostpolicy to have been initialized by `corehost_main`. The bundle's launcher starts the
+  runtime itself, so every assembly fails to load with "Hostpolicy must be initialized ...".
+  `Eto.Test.UnitTests/NUnitTestFramework.cs` runs NUnit in-process there instead (sharing
+  `UnitTestRunner` with the GUI app's Unit Tests section) and implements `--filter` itself — a subset:
+  `FullyQualifiedName`/`Name`/`TestCategory` with `=` `!=` `~` `!~`, combined with `&` and `|`, no
+  parentheses.
+- **A macos-TFM app killed at launch with no output at all** (exit 137, "Code Signature Invalid" in
+  `~/Library/Logs/DiagnosticReports`) means its bundled runtime dylibs weren't re-signed: the SDK rewrites
+  their install names, invalidating Microsoft's signature, and keeps the codesign stamps in `artifacts/obj`
+  — so deleting the `.app` without the obj dir makes it re-copy them and skip signing. Delete
+  `artifacts/obj/Mac/<project>` and rebuild.
 - **Reflection gotcha (net48 vs net):** `Type.GetType("Ns.Type, PresentationCore")` (partial assembly
   name) resolves on .NET but returns **null** on .NET Framework, so tests that reflect over WPF types
   (e.g. finding the native `ScrollViewer`) silently no-op on net48. Search loaded assemblies instead:
@@ -95,7 +128,8 @@ Only the Gtk path above has been exercised; treat the others as starting points 
 
 To exercise the *real* keypress→widget path (e.g. verifying a TextBox fires input events exactly
 once), drive a shown window with **xdotool over the real X display** — `gtk_test_widget_send_key`
-P/Invoke is a no-op here (needs a focused toplevel under a WM). There's **no window manager**, so:
+P/Invoke is a no-op here (needs a focused toplevel under a WM). Window management can't be relied
+on (see the mouse section below — the session is mutter/XWayland), so:
 
 - Launch the app (`DISPLAY=:0 GDK_BACKEND=x11`), give the target widget focus, print a `READY`
   marker, and add a `UITimer` auto-quit so the process never hangs (no `kill` — it's forbidden).
@@ -105,12 +139,131 @@ P/Invoke is a no-op here (needs a focused toplevel under a WM). There's **no win
   **XTEST** (`xdotool key a` / `xdotool type "ab"` — *no* `--window`, which uses XSendEvent that GTK
   ignores). XTEST goes to whatever holds X input focus, which `windowfocus` just set.
 
+## Injecting mouse events to test drag/capture behaviour (Gtk)
+
+**xdotool pointer injection does not work here** (only keyboard does): under a mutter/XWayland
+session a full-screen `mutter guard window` sits above all X clients, so XTEST `mousemove`/
+`mousedown`/`click` never reach the app (`xdotool getmouselocation` reports the root window even
+when the pointer is over your window). Also `xdotool search --name` returns both the mutter frame
+*and* the client window — the frame's geometry is offset from the client's, so clicking `frame + n`
+lands on the decoration; check `xwininfo -id <id>` (`Width`/`Height`) to pick the client.
+
+Instead synthesize GDK events and push them through GTK's real dispatch, which honours grabs
+(`gtk_grab_add` from `gtk_dialog_run`, etc.), so capture/grab behaviour is exercised faithfully:
+
+```csharp
+var ev = Gdk.EventHelper.New(Gdk.EventType.ButtonPress); // or MotionNotify/ButtonRelease
+var bev = new Gdk.EventButton(ev.Handle) { Window = eventBoxGdkWindow, SendEvent = true,
+    Time = time += 100, X = 60, Y = 60, Button = 1, State = 0,
+    Device = Gdk.Display.Default.DefaultSeat.Pointer }; // XRoot/YRoot from Window.GetOrigin
+Gtk.Main.DoEvent(ev);
+```
+
+- Get the widget to target from the handler's `EventControl` (an `EtoEventBox` for `Panel`) and use
+  its `.Window` as the event window, otherwise GTK routes the event elsewhere.
+- A modal `Dialog` blocks in a nested main loop inside your handler, so schedule each later step on
+  its **own** `GLib.Timeout` source — a single source won't re-enter while its callback is blocked.
+- Anything reading the *real* pointer (`Mouse.Position`, `Mouse.Buttons`, and so the location and
+  buttons of events Eto synthesizes itself) still reports the physical mouse, not your fake events.
+
+**Use `Gtk.Global.PropagateEvent`, not `Gtk.Main.DoEvent`, for synthesized *key* events.** `DoEvent`
+silently drops them once any earlier test in the process has shown and closed a window containing a
+`ComboBox` (bisected to `ComboBoxTests.SettingDataStoreToNullAfterPopulatedShouldNotCrash`): the
+toplevel's `key-press-event` never fires, while `Gtk.Grab.Current`, the window-group grab and the
+device grab are all null and the window is active with toplevel focus — so it is not a leftover grab,
+and it is invisible when the fixture runs alone. `Gtk.Global.PropagateEvent(toplevel, ev)` is immune
+and is what GTK itself uses for keys (accelerators → focus widget → window bindings). `DoEvent`
+remains correct for the mouse case above.
+
 ## Test project layout (non-obvious)
 
 - Unit-test **source `.cs` files live in `test/Eto.Test/UnitTests/`** (compiled as part of
   the shared `Eto.Test` project) — that's where you edit tests.
 - You **run** them via `test/Eto.Test.UnitTests/` — a thin runner project (only `Program.cs`)
   that references `Eto.Test.csproj`. Don't look for test code there.
+- **Backend-specific tests go in `test/Eto.Test.<Platform>/UnitTests/`** (e.g.
+  `test/Eto.Test.Mac/UnitTests/`, namespace `Eto.Test.Mac.UnitTests`, deriving from the shared
+  `Eto.Test.UnitTests.TestBase`). Put a test there rather than P/Invoking or reflecting your way to
+  native APIs from the shared project — those projects reference the backend and its bindings
+  directly (`Eto.Mac.Messaging`, `ObjCExtensions`, MonoMac types via global usings; note `Messaging`
+  is ambiguous with `MonoMac.ObjCRuntime.Messaging`, so qualify it as `Eto.Mac.Messaging`).
+- They run **both** ways: `Eto.Test.UnitTests` references the platform test apps and its
+  `Program.GetTestAssemblies()` yields each one (gated on `Platform.Instance.IsMac`/`IsGtk`/…), so
+  `dotnet test` picks them up; and the Eto.Test GUI app's **Unit Tests section** runs them via
+  `app.TestAssemblies.Add(typeof(Startup).Assembly)` in each platform's `Startup`. Discovery is
+  per-assembly, so a new fixture in an existing `Eto.Test.<Platform>/UnitTests/` folder needs no
+  registration. `dotnet test ... -- --platform=mac|gtk|wpf|winforms` overrides platform detection.
+
+## Mac: `AddMethod`/`ClassAddProtocol` are per-CLASS, not per-instance
+
+`MacBase.AddMethod` and `ObjCExtensions.ClassAddProtocol` both resolve `Class.GetHandle(view.GetType())`,
+so anything they add applies to **every instance of that native class, app-wide, forever**. The delegate
+bodies compensate by looking the handler up per instance (`MacBase.GetHandler(obj)`), but *conformance*
+does not — e.g. hooking `TextInput` on one `Drawable` used to make every `EtoDrawableView` conform to
+`NSTextInputClient`, so the OS treated them all as text input (AutoFill in their context menus).
+`MacViewTextInput` handles this by also overriding `inputContext`/`conformsToProtocol:` to answer per
+instance from `IMacViewHandler.HandlesTextInput`. Apply the same pattern for any new class-level state.
+
+For the same reason a handler's control must never be an instance of a *shared base* view class: the
+methods added for its events are inherited by every view deriving from that base. `NativeControlHandler`
+used a bare `MacPanelView`, so handling `KeyDown` on a `NativeControlHost` gave the window's
+`EtoContentView` a `keyDown:` too and every `Form.KeyDown` fired twice. Give each handler its own
+subclass, however empty.
+
+**`e.Handled = true` in `MouseDown` silently kills the control's `ContextMenu` on Mac.**
+`MacView.TriggerMouseDown` only forwards to `objc_msgSendSuper` when `!args.Handled`, and it's that super
+call to `rightMouseDown:` that makes AppKit show the view's menu. A handler that blanket-sets `Handled`
+must exclude `MouseButtons.Alternate` (see `DrawableSection.InputMethodDrawable`).
+
+**Verifying such overrides needs raw `objc_msgSend`.** MonoMac's managed members (`NSView.InputContext`,
+`NSObject.ConformsToProtocol`, …) dispatch via `objc_msgSendSuper` for *managed subclasses*
+(`IsDirectBinding == false`), which skips the very override you added — so the managed API reports the
+un-overridden answer and the fix looks broken. Use `Eto.Mac.Messaging.*_objc_msgSend*` on `view.Handle`
+instead (see `Eto.Test.Mac/UnitTests/DrawableTests.IsTextInputClient`). AppKit itself calls through
+normal dispatch, so it does see the override.
+
+## Mac: which appearance a build gets depends on its linked SDK, not on the backend
+
+Whether AppKit renders a build with Liquid Glass or the compatibility appearance depends on the SDK the
+**main executable** was linked against, which is not a stable property of a backend: for `Eto.macOS` that
+is the Xcode used to compile it, but for `Eto.Mac64` it is the .NET SDK's prebuilt apphost, whose SDK
+changes whenever Microsoft rebuilds it. So "Mac64 is pre-Tahoe" has a shelf life — prefer measuring real
+values over branching on the appearance, and note that `MacVersion.IsUsingGlass` (SDK-derived) and
+`MacVersion.IsAtLeast(26, 0)` (OS-derived) answer genuinely different questions.
+
+## Adding a member to a widget's `IHandler`
+
+Handler interfaces have no default implementations (core targets `netstandard2.0`), so a new member
+must be implemented in **every** registered backend or the build breaks. For a given widget, find
+them via `grep -rn "<Widget>.IHandler" src/ --include="*.cs"` — note `Eto.iOS`/`Eto.WinUI` often have
+theirs commented out in `Platform.cs` and so need nothing. On macOS/Linux you can only compile
+`Eto`, `Eto.Gtk` and `Eto.Mac`; `Eto.Wpf`/`Eto.WinForms` need Windows (net48 also needs the targeting
+pack) and `Eto.Android` needs the android workload — so those edits go in unverified by compile.
+
+Note this is a binary-breaking change for any third-party handler implementation.
+
+## `CheckBoxList` / `EnumCheckBoxList` gotcha
+
+**`SelectedValues`/`SelectedKeys` silently no-op until the control is loaded.** The setters iterate
+an internal `buttons` list that isn't populated until `CheckBoxList.OnLoad` assigns
+`DataStore = CreateDefaultItems()` — and that happens *after* `base.OnLoad` raises the `Load` event,
+so a `Load` handler is still too early. Set an initial selection from `LoadComplete` (or after
+touching `.Items`, which materializes the data store), never from the constructor.
+
+Also, `EnumCheckBoxList`'s `AddValue` filter matches on the enum **value**, not the name, so it can't
+tell apart two members that share a value — filtering out an aggregate like `All` also drops any
+single flag that happens to equal it, and the list can come up empty. Same reason `Enum.GetNames`
+reports both names for that value.
+
+## `[Flags]` enums that mean "everything, including future values"
+
+Enum members are inlined into consumers as **compile-time constants**, so redefining an aggregate
+(`All = A` → `All = A | B`) silently leaves already-compiled callers passing the old bits. Where a
+value means "all of it, whatever gets added later", give it every bit: `All = ~0` (see
+`ContextMenuSystemItems`; the BCL does the same with `EventKeywords.All = -1`). Handlers must then
+test `value != None` rather than `value.HasFlag(All)`, which only matches when *every* bit is set.
+`ToString()` still prints `All`, since exact member matches win over bitfield decomposition.
+Note `MenuBarSystemItems.All = Common | Quit` predates this and has the older shape.
 
 ## Platform / TFM mapping
 

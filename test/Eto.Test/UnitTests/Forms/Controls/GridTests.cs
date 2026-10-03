@@ -632,6 +632,40 @@ namespace Eto.Test.UnitTests.Forms.Controls
 		}
 
 		[Test]
+		public void SettingSelectedRowsToEmptyShouldNotSelectAnyRow()
+		{
+			Shown(form =>
+			{
+				var grid = new T();
+				grid.ShowHeader = false;
+				grid.Size = new Size(200, 200);
+				grid.AllowMultipleSelection = false;
+				grid.Columns.Add(new GridColumn { DataCell = new TextBoxCell { Binding = Binding.Property((GridTestItem m) => m.Text) } });
+				SetDataStore(grid, CreateDataStore());
+
+				form.Content = grid;
+				return grid;
+			}, grid =>
+			{
+				// nothing should be selected to start with
+				Assert.That(grid.SelectedRows, Is.Empty, "#1 Grid should not have any selection initially");
+
+				// setting an empty enumeration should keep the selection empty, not select the first row
+				grid.SelectedRows = Enumerable.Empty<int>();
+				Assert.That(grid.SelectedRows, Is.Empty, "#2 Setting SelectedRows to an empty enumeration should not select a row");
+				Assert.That(grid.SelectedRow, Is.EqualTo(-1), "#3 SelectedRow should be -1 when nothing is selected");
+
+				// ..and it should also clear an existing selection
+				grid.SelectedRow = 2;
+				Assert.That(grid.SelectedRow, Is.EqualTo(2), "#4 SelectedRow should be set");
+
+				grid.SelectedRows = Enumerable.Empty<int>();
+				Assert.That(grid.SelectedRows, Is.Empty, "#5 Setting SelectedRows to an empty enumeration should clear the selection, not select the first row");
+				Assert.That(grid.SelectedRow, Is.EqualTo(-1), "#6 SelectedRow should be -1 after clearing the selection");
+			});
+		}
+
+		[Test]
 		public void ColumnsShouldAutoSizeWhenSettingDataAfterLoaded()
 		{
 			ShownAsync(form =>
@@ -647,13 +681,13 @@ namespace Eto.Test.UnitTests.Forms.Controls
 
 			}, async grid =>
 			{
-				await Task.Delay(500);
+				await Task.Delay(100);
 				var list = new TreeGridItemCollection();
 				list.Add(new GridTestItem { Text = "A bit longer text 1", Values = new[] { "Some longer text in the second column 1" } });
 				list.Add(new GridTestItem { Text = "A bit longer text 2", Values = new[] { "Some longer text in the second column 2" } });
 				list.Add(new GridTestItem { Text = "A bit longer text 3", Values = new[] { "Some longer text in the second column 3" } });
 				SetDataStore(grid, list);
-				await Task.Delay(500);
+				await WaitUntil(() => grid.Columns[0].Width > 50 && grid.Columns[1].Width > 50, 500);
 				Assert.That(grid.Columns[0].Width, Is.GreaterThan(50), "First column should be auto-sized to be greater than 50px");
 				Assert.That(grid.Columns[1].Width, Is.GreaterThan(50), "Second column should be auto-sized to be greater than 50px");
 			});
@@ -709,88 +743,5 @@ namespace Eto.Test.UnitTests.Forms.Controls
 
 			return grid;
 		});
-
-		// Automatic regression coverage for the b46b9827 scrollable-fill regression. The fix lives in the shared
-		// WpfFrameworkElement.MeasureOverride, so the enclosed WPF ScrollViewer's viewport should track the grid's
-		// actual (arranged) size: a viewport much smaller than the control means the content doesn't fill the
-		// scrollable area (the regression); much larger means it measured against the auto-size monitor probe and
-		// won't scroll correctly. These inspect the native ScrollViewer via reflection, so they only run on WPF.
-		// Resolve a WPF type from the loaded assemblies by full name. Type.GetType with a partial assembly name
-		// (e.g. "...,PresentationCore") resolves on .NET but returns null on .NET Framework, so search instead.
-		static Type WpfType(string fullName) => AppDomain.CurrentDomain.GetAssemblies()
-			.Select(a => a.GetType(fullName))
-			.FirstOrDefault(t => t != null);
-
-		static object WpfFindScrollViewer(object visual)
-		{
-			var vth = WpfType("System.Windows.Media.VisualTreeHelper");
-			var svType = WpfType("System.Windows.Controls.ScrollViewer");
-			if (vth == null || svType == null || visual == null)
-				return null;
-			if (svType.IsInstanceOfType(visual))
-				return visual;
-			var count = (int)vth.GetMethod("GetChildrenCount").Invoke(null, new[] { visual });
-			for (int i = 0; i < count; i++)
-			{
-				var found = WpfFindScrollViewer(vth.GetMethod("GetChild").Invoke(null, new object[] { visual, i }));
-				if (found != null)
-					return found;
-			}
-			return null;
-		}
-
-		static double WpfGetDouble(object o, string prop) => o == null ? double.NaN : Convert.ToDouble(o.GetType().GetProperty(prop).GetValue(o));
-
-		void AssertViewportTracksActualSize(bool autoSize)
-		{
-			if (!Platform.Instance.IsWpf)
-				Assert.Inconclusive("Inspects the native WPF ScrollViewer viewport; WPF only");
-
-			ShownAsync(form =>
-			{
-				if (autoSize)
-				{
-					form.Resizable = true;
-					form.AutoSize = true;
-				}
-				else
-				{
-					form.ClientSize = new Size(500, 400);
-				}
-
-				var grid = new T { ShowHeader = false, Size = new Size(150, 100) };
-				grid.Columns.Add(new GridColumn { DataCell = new TextBoxCell { Binding = Binding.Property((GridTestItem m) => m.Text) }, AutoSize = true });
-
-				var list = new TreeGridItemCollection();
-				for (int i = 0; i < 100; i++)
-					list.Add(new GridTestItem { Text = $"Item {i}" });
-				SetDataStore(grid, list);
-
-				// stretch + expand so the grid fills the window (larger than its 150x100 preferred size)
-				form.Content = new StackLayout { HorizontalContentAlignment = HorizontalAlignment.Stretch, Items = { new StackLayoutItem(grid, true) } };
-				return grid;
-			}, async grid =>
-			{
-				await Task.Delay(700);
-				var control = grid.ControlObject;
-				var sv = WpfFindScrollViewer(control);
-				Assert.That(sv, Is.Not.Null, "Could not find the ScrollViewer in the grid");
-
-				var actualWidth = WpfGetDouble(control, "ActualWidth");
-				var viewportWidth = WpfGetDouble(sv, "ViewportWidth");
-
-				// The viewport (in pixels) should track the control's actual width - not clamped down to the
-				// ~150px preferred size (content wouldn't fill the scrollable area), nor blown up to the
-				// auto-size monitor-sized probe (scroll bars wouldn't reflect the visible area).
-				Assert.That(viewportWidth, Is.GreaterThan(actualWidth * 0.6).And.LessThan(actualWidth * 1.2),
-					$"ScrollViewer viewport width ({viewportWidth}) should track the grid's actual width ({actualWidth})");
-			}, timeout: -1);
-		}
-
-		[Test]
-		public void ContentShouldFillScrollableAreaWhenLargerThanPreferredSize() => AssertViewportTracksActualSize(autoSize: false);
-
-		[Test]
-		public void ContentShouldFillScrollableAreaInAutoSizedWindow() => AssertViewportTracksActualSize(autoSize: true);
 	}
 }

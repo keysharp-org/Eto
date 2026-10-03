@@ -4,7 +4,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DefineConstants>$(DefineConstants);PCL</DefineConstants>
     <OutputType>Library</OutputType>
-      
+    <IsTestProject>false</IsTestProject>
   </PropertyGroup>
   
   <PropertyGroup>
@@ -23,6 +23,11 @@
   <ItemGroup>
     <Compile Include="..\..\src\Eto\Helper.cs">
       <Link>Helper.cs</Link>
+    </Compile>
+    <!-- shared with each platform backend (see src/Shared), compiled here so UnitTests\Drawing\BaseBitmapDataTests
+         can test it directly against a data buffer it controls -->
+    <Compile Include="..\..\src\Shared\BaseBitmapData.cs">
+      <Link>BaseBitmapData.cs</Link>
     </Compile>
   </ItemGroup>
   <ItemGroup>

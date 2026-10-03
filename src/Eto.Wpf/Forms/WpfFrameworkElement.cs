@@ -401,6 +401,19 @@ namespace Eto.Wpf.Forms
 
 		protected virtual sw.FrameworkElement KeyEventControl => Control;
 
+		/// <summary>
+		/// An additional element to hook the key events on, for when the routed event does not pass
+		/// through <see cref="KeyEventControl"/> at all.
+		/// </summary>
+		/// <remarks>
+		/// Windows hook their key events on an inner element so they are seen before the window's own
+		/// input bindings (menu shortcuts) can mark them as handled. That element is only in the route
+		/// when something inside the content has keyboard focus, so when focus is on the window itself
+		/// the key events would otherwise never be raised. Events from this element are ignored when
+		/// they already went through <see cref="KeyEventControl"/>.
+		/// </remarks>
+		protected virtual sw.FrameworkElement FallbackKeyEventControl => null;
+
 		public virtual void Focus()
 		{
 			if (FocusControl.IsLoaded)
@@ -504,12 +517,19 @@ namespace Eto.Wpf.Forms
 						KeyEventControl.KeyDown += HandleKeyDown;
 						KeyEventControl.TextInput += HandleTextInput;
 					}
+					if (FallbackKeyEventControl is sw.FrameworkElement fallbackKeyDown)
+					{
+						fallbackKeyDown.KeyDown += HandleFallbackKeyDown;
+						fallbackKeyDown.TextInput += HandleFallbackTextInput;
+					}
 					break;
 				case Eto.Forms.Control.TextInputEvent:
 					HandleEvent(Eto.Forms.Control.KeyDownEvent);
 					break;
 				case Eto.Forms.Control.KeyUpEvent:
 					KeyEventControl.KeyUp += HandleKeyUp;
+					if (FallbackKeyEventControl is sw.FrameworkElement fallbackKeyUp)
+						fallbackKeyUp.KeyUp += HandleFallbackKeyUp;
 					break;
 				case Eto.Forms.Control.ShownEvent:
 					ContainerControl.IsVisibleChanged += HandleIsVisibleChanged;
@@ -551,7 +571,9 @@ namespace Eto.Wpf.Forms
 					// handled in DoDragDrop, as it is blocking on Windows
 					break;
 				case Eto.Forms.Control.EnabledChangedEvent:
-					Control.IsEnabledChanged += Control_IsEnabledChanged;
+					// Enabled is set on the container, which isn't always the same as Control (and Control
+					// may not even be in the visual tree yet, e.g. an empty TableLayout), so watch that instead.
+					ContainerControl.IsEnabledChanged += Control_IsEnabledChanged;
 					break;
 				case Eto.Forms.Control.ThemeChangedEvent:
 					if (_needsThemeChanged)
@@ -852,8 +874,37 @@ namespace Eto.Wpf.Forms
 			return new WpfDragEventArgs(source, dragData, data.AllowedEffects.ToEto(), location, modifiers, buttons, controlObject);
 		}
 
+		/// <summary>
+		/// The routed args last seen by the primary key handlers, so the fallback handlers can tell
+		/// whether the event already went through <see cref="KeyEventControl"/>.
+		/// </summary>
+		/// <remarks>
+		/// <see cref="KeyEventControl"/> is always hit before <see cref="FallbackKeyEventControl"/>,
+		/// either as a descendant of it in the bubbling route, or via the tunneling preview event.
+		/// </remarks>
+		object _lastKeyEventArgs;
+
+		void HandleFallbackKeyDown(object sender, swi.KeyEventArgs e)
+		{
+			if (!ReferenceEquals(_lastKeyEventArgs, e))
+				HandleKeyDown(sender, e);
+		}
+
+		void HandleFallbackKeyUp(object sender, swi.KeyEventArgs e)
+		{
+			if (!ReferenceEquals(_lastKeyEventArgs, e))
+				HandleKeyUp(sender, e);
+		}
+
+		void HandleFallbackTextInput(object sender, swi.TextCompositionEventArgs e)
+		{
+			if (!ReferenceEquals(_lastKeyEventArgs, e))
+				HandleTextInput(sender, e);
+		}
+
 		void HandleTextInput(object sender, swi.TextCompositionEventArgs e)
 		{
+			_lastKeyEventArgs = e;
 			var tiargs = new TextInputEventArgs(e.Text);
 			Callback.OnTextInput(Widget, tiargs);
 			if (tiargs.Cancel)
@@ -873,6 +924,7 @@ namespace Eto.Wpf.Forms
 
 		void HandleKeyDown(object sender, swi.KeyEventArgs e)
 		{
+			_lastKeyEventArgs = e;
 			if (SuppressKeyEvents)
 				return;
 
@@ -886,9 +938,10 @@ namespace Eto.Wpf.Forms
 
 		void HandleKeyUp(object sender, swi.KeyEventArgs e)
 		{
+			_lastKeyEventArgs = e;
 			if (SuppressKeyEvents)
 				return;
-			
+
 			var args = e.ToEto(KeyEventType.KeyUp);
 			if (args.KeyData != Keys.None)
 			{
@@ -938,7 +991,10 @@ namespace Eto.Wpf.Forms
 				// this can happen when something happens during the mouse dragging, such as showing a dialog.
 				isMouseCaptured = false;
 
-				var args = e.ToEto(ContainerControl, swi.MouseButtonState.Released);
+				// MouseButtons.None is passed as the user may not have released the button yet,
+				// so it isn't mistakenly taken as a mouse click.
+				var location = e.GetPosition(ContainerControl).ToEto();
+				var args = new MouseEventArgs(MouseButtons.None, swi.Keyboard.Modifiers.ToEto(), location);
 				Callback.OnMouseUp(Widget, args);
 			}
 		}
@@ -1013,10 +1069,17 @@ namespace Eto.Wpf.Forms
 		{
 			if (NeedsPixelSizeNotifications && Win32.PerMonitorDpiSupported)
 			{
+				// Only ever keep one subscription, in case OnLoadComplete is called again without an
+				// OnUnLoad in between. Otherwise OnUnLoad leaves the extra one behind and the parent
+				// window keeps this control (and everything it references) alive.
 				var parent = Widget.ParentWindow;
-				if (parent != null)
+				var oldParent = ParentWindow;
+				if (!ReferenceEquals(parent, oldParent))
 				{
-					parent.LogicalPixelSizeChanged += Parent_PixelSizeChanged;
+					if (oldParent != null)
+						oldParent.LogicalPixelSizeChanged -= Parent_PixelSizeChanged;
+					if (parent != null)
+						parent.LogicalPixelSizeChanged += Parent_PixelSizeChanged;
 					ParentWindow = parent;
 				}
 			}
@@ -1079,9 +1142,19 @@ namespace Eto.Wpf.Forms
 
 		System.Windows.Forms.Screen SwfScreen => Win32.GetScreenFromWindow(Widget.ParentWindow?.NativeHandle ?? IntPtr.Zero);
 
+		/// <summary>
+		/// Determines if the control can be translated to/from screen co-ordinates.
+		/// </summary>
+		/// <remarks>
+		/// WPF raises its Loaded event at <see cref="sw.Threading.DispatcherPriority.Loaded"/>, so its IsLoaded can still
+		/// be false right after a control has been added, measured and arranged (e.g. after Control.UpdateLayout()).
+		/// Eto's Loaded state is already set at that point, so check both to translate as soon as it is possible.
+		/// </remarks>
+		bool CanTranslateToScreen => ContainerControl.IsLoaded || Widget.Loaded;
+
 		public PointF PointFromScreen(PointF point)
 		{
-			if (!ContainerControl.IsLoaded)
+			if (!CanTranslateToScreen)
 				return point;
 
 			// ensure we're connected to a presentation source
@@ -1115,7 +1188,7 @@ namespace Eto.Wpf.Forms
 
 		public PointF PointToScreen(PointF point)
 		{
-			if (!ContainerControl.IsLoaded)
+			if (!CanTranslateToScreen)
 				return point;
 
 			// ensure we're connected to a presentation source
@@ -1160,6 +1233,12 @@ namespace Eto.Wpf.Forms
 		{
 			get { return swi.KeyboardNavigation.GetTabIndex(TabControl); }
 			set { swi.KeyboardNavigation.SetTabIndex(TabControl, value); }
+		}
+
+		public virtual bool TabStop
+		{
+			get { return swi.KeyboardNavigation.GetIsTabStop(TabControl); }
+			set { swi.KeyboardNavigation.SetIsTabStop(TabControl, value); }
 		}
 
 		public virtual IEnumerable<Control> VisualControls => Enumerable.Empty<Control>();

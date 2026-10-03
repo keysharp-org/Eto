@@ -12,6 +12,8 @@ namespace Eto.Mac.Forms
 
 		public MessageBoxDefaultButton DefaultButton { get; set; }
 
+		public Image Image { get; set; }
+
 		public DialogResult ShowDialog(Control parent)
 		{
 			var alert = CreateDialog();
@@ -184,7 +186,7 @@ namespace Eto.Mac.Forms
 
 		NSAlert CreateDialog()
 		{
-			MacView.InMouseTrackingLoop = false;
+			MacView.CancelMouseTracking();
 			var alert = new NSAlert();
 
 			AddButtons(alert);
@@ -192,6 +194,7 @@ namespace Eto.Mac.Forms
 			alert.AlertStyle = Convert(Type);
 			alert.MessageText = Caption ?? string.Empty;
 			alert.InformativeText = Text ?? string.Empty;
+			alert.Icon = Image?.ToNS() ?? NSApplication.SharedApplication.ApplicationIconImage;
 
 			return alert;
 		}

@@ -345,6 +345,7 @@ public class Application : Widget
 	{
 		Instance = this;
 		mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
+		Initialize();
 	}
 
 	Application(InitHelper init)
@@ -708,7 +709,7 @@ public class Application : Widget
 			using (widget.Platform.Context)
 				widget.OnIsActiveChanged(e);
 		}
-		
+
 		/// <summary>
 		/// Raises the <see cref="Application.ThemeChanged"/> event.
 		/// </summary>
@@ -722,6 +723,7 @@ public class Application : Widget
 	/// <summary>
 	/// Handler interface for the <see cref="Application"/> class
 	/// </summary>
+	[AutoInitialize(false)]
 	public new interface IHandler : Widget.IHandler
 	{
 		/// <summary>

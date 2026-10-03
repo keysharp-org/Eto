@@ -7,9 +7,13 @@ using System.Reflection;
 using System.Runtime.Loader;
 #endif
 using System.Threading.Tasks;
+using Microsoft.Testing.Extensions;
 using Microsoft.Testing.Platform.Builder;
+using Microsoft.Testing.Platform.Capabilities.TestFramework;
 using NUnit.Framework;
+#if !MACOS
 using NUnit.VisualStudio.TestAdapter.TestingPlatformAdapter;
+#endif
 
 namespace Eto.Test.UnitTests;
 
@@ -18,7 +22,66 @@ internal static class Program
 {
 	static IEnumerable<Assembly> GetTestAssemblies()
 	{
+		// When more than one assembly is listed, the VSTest bridge requires the test application's
+		// own assembly to be among them.
+		yield return typeof(Program).Assembly;
+
 		yield return typeof(Eto.Test.MainForm).Assembly;
+#if WINDOWS || NETFRAMEWORK
+		if (Platform.Instance.IsWpf)
+		{
+			// WPF-specific fixtures from test/Eto.Test.Wpf/UnitTests
+			yield return typeof(Eto.Test.Wpf.UnitTests.BitmapTests).Assembly;
+		}
+		if (Platform.Instance.IsWinForms)
+		{
+			// WinForms-specific fixtures from test/Eto.Test.WinForms/UnitTests
+			yield return typeof(Eto.Test.WinForms.UnitTests.NativeTests).Assembly;
+		}
+#elif MACOS
+		// the net*-macos build only has the Mac backend (Eto.macOS/Eto.Test.macOS)
+		if (Platform.Instance.IsMac)
+		{
+			// Mac-specific fixtures from test/Eto.Test.Mac/UnitTests
+			yield return typeof(Eto.Test.Mac.UnitTests.BitmapTests).Assembly;
+		}
+#elif NET && LINUX
+		if (Platform.Instance.IsGtk)
+		{
+			// GTK-specific fixtures from test/Eto.Test.Gtk/UnitTests
+			yield return typeof(Eto.Test.Gtk.UnitTests.NativeParentWindowTests).Assembly;
+		}
+#elif NET && OSX
+		if (Platform.Instance.IsMac)
+		{
+			// Mac-specific fixtures from test/Eto.Test.Mac/UnitTests
+			yield return typeof(Eto.Test.Mac.UnitTests.BitmapTests).Assembly;
+		}
+#endif
+	}
+
+	/// <summary>
+	/// Registers the platform's <see cref="ITestInput"/> implementation, which lives in the
+	/// Eto.Test.&lt;Platform&gt; app assembly alongside its other platform-specific test code. The apps
+	/// do this in their own Startup, so it has to be done here as well for `dotnet test`.
+	/// </summary>
+	static void RegisterTestInput(Platform platform)
+	{
+#if WINDOWS || NETFRAMEWORK
+		if (platform.IsWpf)
+			platform.Add<ITestInput>(() => new Eto.Test.Wpf.TestInput());
+		else if (platform.IsWinForms)
+			platform.Add<ITestInput>(() => new Eto.Test.WinForms.TestInput());
+#elif MACOS
+		if (platform.IsMac)
+			platform.Add<ITestInput>(() => new Eto.Test.Mac.TestInput());
+#elif NET && LINUX
+		if (platform.IsGtk)
+			platform.Add<ITestInput>(() => new Eto.Test.Gtk.TestInput());
+#elif NET && OSX
+		if (platform.IsMac)
+			platform.Add<ITestInput>(() => new Eto.Test.Mac.TestInput());
+#endif
 	}
 
 	[STAThread]
@@ -26,7 +89,68 @@ internal static class Program
 	{
 		AvoidThemeSatelliteResolverCrash();
 
-		using var app = new Application();
+		List<string> testArgs = new();
+		// check any of the args for platform override
+		Platform? platform = null;
+		foreach (var arg in args)
+		{
+			if (arg.StartsWith("--platform=", StringComparison.OrdinalIgnoreCase))
+			{
+				Console.WriteLine($"Overriding platform with '{arg}'");
+				var platformName = arg.Substring("--platform=".Length);
+				if (!string.IsNullOrEmpty(platformName))
+				{
+					switch (platformName.ToLowerInvariant())
+					{
+#if WINDOWS || NETFRAMEWORK
+						case "wpf":
+							platform = new Eto.Wpf.Platform();
+							break;
+						case "winforms":
+							platform = new Eto.WinForms.Platform();
+							break;
+#elif MACOS
+						case "mac":
+							platform = new Eto.Mac.Platform();
+							break;
+#elif NET && LINUX
+						case "gtk":
+							platform = new Eto.GtkSharp.Platform();
+							break;
+#elif NET && OSX
+						case "mac":
+							platform = new Eto.Mac.Platform();
+							break;
+#endif
+						default:
+							throw new ArgumentException($"Unknown platform '{platformName}'");
+					}
+				}
+			}
+			else
+			{
+				testArgs.Add(arg);
+			}
+		}
+		
+		if (platform == null)
+			platform = Platform.Detect;
+
+		RegisterTestInput(platform);
+
+		using var app = new Application(platform);
+
+#if MACOS || OSX
+		// Focusing a control needs the app to be active, and macOS hands activation over only when no
+		// other app is holding it - so with anything else frontmost (Finder, on a CI runner) the test
+		// windows never become key and no control in them can get focus. An automated test run is
+		// exactly the case where taking activation from whatever is frontmost is the right thing to do.
+		if (app.Handler is Eto.Mac.Forms.ApplicationHandler macApplication)
+		{
+			macApplication.ActivateOnStartup = true;
+			macApplication.ActivateIgnoringOtherApps = true;
+		}
+#endif
 
 		var exitCodeSource = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -36,12 +160,14 @@ internal static class Program
 			_ = Task.Run(async () =>
 			{
 				SynchronizationContext.SetSynchronizationContext(context);
-				await RunTestsAndQuitAsync(app, args, exitCodeSource);
+				await RunTestsAndQuitAsync(app, testArgs.ToArray(), exitCodeSource);
 			});
 		};
 		app.Run();
 
-		return exitCodeSource.Task.Result;
+		// Only reached when the app quits normally (see RunTestsAndQuitAsync); the task is always complete
+		// by then, and a failure to even run the tests was already reported there.
+		return GetExitCode(exitCodeSource);
 	}
 
 	static readonly string[] WpfThemeSuffixes = { ".Aero2", ".Aero", ".AeroLite", ".Classic", ".Luna", ".Royale", ".Generic" };
@@ -72,19 +198,60 @@ internal static class Program
 		{
 			var options = new TestApplicationOptions();
 			ITestApplicationBuilder builder = await Microsoft.Testing.Platform.Builder.TestApplication.CreateBuilderAsync(args);
+#if MACOS
+			// NUnit3TestAdapter's bridge can't load test assemblies under the macOS app bundle's host, so run
+			// NUnit in-process instead - see NUnitTestFramework.
+			builder.CommandLine.AddProvider(() => new FilterCommandLineOptionsProvider());
+			builder.RegisterTestFramework(
+				serviceProvider => new TestFrameworkCapabilities(new TrxReportCapability()),
+				(capabilities, serviceProvider) => new NUnitTestFramework(GetTestAssemblies, serviceProvider));
+#else
 			builder.AddNUnit(GetTestAssemblies);
+#endif
+			// registered explicitly (adds the trx report options) as we don't use the generated entry point
+			builder.AddTrxReportProvider();
 
+			// ITestApplication is IDisposable only, there's no async disposal to await here.
 			using ITestApplication testApplication = await builder.BuildAsync();
 			int exitCode = await testApplication.RunAsync();
 			exitCodeSource.TrySetResult(exitCode);
 		}
 		catch (Exception ex)
 		{
+			// log it here as well, the exception from Main is not always reported before we exit
+			Console.Error.WriteLine($"Error running tests: {ex}");
 			exitCodeSource.TrySetException(ex);
 		}
 		finally
 		{
-			app.Invoke(() => app.Quit()); // quit app after tests complete
+			// Quit the app once tests complete, exiting with the test result so a failing run actually
+			// fails the process. Task.IsCompletedSuccessfully isn't available on .NET Framework, so check
+			// the status directly.
+			var exitCode = GetExitCode(exitCodeSource);
+
+			// On Mac NSApplication.Terminate() ends the process itself with exit(0) and never returns from
+			// Application.Run(), so both Main's return value and Environment.ExitCode are discarded there -
+			// Environment.Exit is the only way to report the result. Everywhere else quit normally and let
+			// Main return it: Environment.Exit terminates the process immediately, which can kill the test
+			// host before the testing platform finishes shutting down and writes its trx report (seen on
+			// Gtk, where a test that leaves the loop dirty makes NUnit's engine shutdown time out first).
+			if (Platform.Instance.IsMac)
+			{
+				app.Invoke(() => Environment.Exit(exitCode));
+			}
+			else
+			{
+				app.Invoke(() => app.Quit());
+				// A test that left the UI loop in a bad state can keep it from quitting, so force the
+				// process down if that happens rather than letting the run sit until the CI step timeout.
+				// The report is already written by this point, so nothing is lost by exiting here.
+				_ = Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ => Environment.Exit(exitCode));
+			}
 		}
+	}
+
+	static int GetExitCode(TaskCompletionSource<int> exitCodeSource)
+	{
+		return exitCodeSource.Task.Status == TaskStatus.RanToCompletion ? exitCodeSource.Task.Result : 1;
 	}
 }

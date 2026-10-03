@@ -22,6 +22,8 @@ namespace Eto.GtkSharp.Forms.Controls
 
 		protected bool SkipSelectedChange { get; set; }
 
+		bool suppressFocusSelection;
+
 		public Gtk.ScrolledWindow ScrolledWindow { get; private set; }
 		public EtoEventBox Box { get; private set; }
 
@@ -142,26 +144,42 @@ namespace Eto.GtkSharp.Forms.Controls
 			columns.Register(Widget.Columns);
 			base.Initialize();
 
-			Control.Selection.Changed += (sender, args) =>
-			{
-				// Prevent unselecting last selected item.
-				if (!AllowEmptySelection && AllowMultipleSelection && Control.Selection.CountSelectedRows() == 0)
-				{
-					Control.GetCursor(out var cursorRow, out _);
-					if (cursorRow != null)
-					{
-						Control.Selection.SelectPath(cursorRow);
-					}
-				}
-			};
+			// note: these must go through the (weakly referencing) connector, otherwise the native
+			// signal keeps a strong reference to this handler and the control can never be collected.
+			Control.Selection.Changed += Connector.HandlePreventEmptySelection;
+			Control.Selection.SelectFunction = Connector.HandleSelectFunction;
+			Control.FocusGrabbed += Connector.HandleFocusToCursorBefore;
+			Control.FocusGrabbed += Connector.HandleFocusToCursorAfter;
+			Control.FocusInEvent += Connector.HandleFocusInToCursorBefore;
+			Control.FocusInEvent += Connector.HandleFocusInToCursorAfter;
 
-			Control.QueryTooltip += Control_QueryTooltip;
+			Control.QueryTooltip += Connector.HandleQueryTooltip;
 			Control.HasTooltip = true;
 
 			HandleEvent(Eto.Forms.Control.MouseDownEvent);			
 		}
 
-		private void Control_QueryTooltip(object o, Gtk.QueryTooltipArgs args)
+		// GTK moves the cursor to the first row when the tree is first focused, selecting it when in single/browse
+		// mode. Every other platform leaves the selection empty, so veto that one selection via the select function
+		// and keep the cursor, which is what keyboard navigation needs.
+		void BeginFocusToCursor() => suppressFocusSelection = AllowEmptySelection && Control.Selection.CountSelectedRows() == 0;
+
+		void EndFocusToCursor() => suppressFocusSelection = false;
+
+		void PreventEmptySelection()
+		{
+			// Prevent unselecting last selected item.
+			if (!AllowEmptySelection && AllowMultipleSelection && Control.Selection.CountSelectedRows() == 0)
+			{
+				Control.GetCursor(out var cursorRow, out _);
+				if (cursorRow != null)
+				{
+					Control.Selection.SelectPath(cursorRow);
+				}
+			}
+		}
+
+		void OnQueryTooltip(object o, Gtk.QueryTooltipArgs args)
 		{
 			var offset = 0;
 			if (Control.HeadersVisible)
@@ -196,6 +214,22 @@ namespace Eto.GtkSharp.Forms.Controls
 		protected class GridConnector : GtkControlConnector
 		{
 			public new GridHandler<TWidget, TCallback> Handler { get { return (GridHandler<TWidget, TCallback>)base.Handler; } }
+
+			public void HandlePreventEmptySelection(object sender, EventArgs e) => Handler?.PreventEmptySelection();
+
+			public bool HandleSelectFunction(Gtk.TreeSelection selection, Gtk.ITreeModel model, Gtk.TreePath path, bool pathCurrentlySelected) => Handler?.suppressFocusSelection != true;
+
+			[GLib.ConnectBefore]
+			public void HandleFocusToCursorBefore(object sender, EventArgs e) => Handler?.BeginFocusToCursor();
+
+			public void HandleFocusToCursorAfter(object sender, EventArgs e) => Handler?.EndFocusToCursor();
+
+			[GLib.ConnectBefore]
+			public void HandleFocusInToCursorBefore(object sender, Gtk.FocusInEventArgs args) => Handler?.BeginFocusToCursor();
+
+			public void HandleFocusInToCursorAfter(object sender, Gtk.FocusInEventArgs args) => Handler?.EndFocusToCursor();
+
+			public void HandleQueryTooltip(object o, Gtk.QueryTooltipArgs args) => Handler?.OnQueryTooltip(o, args);
 
 			[GLib.ConnectBefore]
 			public override void HandleButtonPressEvent(object sender, Gtk.ButtonPressEventArgs args)
@@ -548,9 +582,12 @@ namespace Eto.GtkSharp.Forms.Controls
 				SkipSelectedChange = true;
 				SetSelectedRows(value);
 				SkipSelectedChange = false;
-				Callback.OnSelectionChanged(Widget, EventArgs.Empty);
+				TriggerSelectionChanged();
 			}
 		}
+
+		// Use when changing the selection ourselves, as the native Changed signal is suppressed in that case.
+		protected virtual void TriggerSelectionChanged() => Callback.OnSelectionChanged(Widget, EventArgs.Empty);
 
 		protected abstract void SetSelectedRows(IEnumerable<int> value);
 
