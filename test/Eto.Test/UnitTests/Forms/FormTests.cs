@@ -9,6 +9,36 @@ public class FormTests : WindowTests<Form>
 	protected override void Show(Form window) => window.Show();
 	protected override Task ShowAsync(Form window) => window.ShowAsync();
 
+	[TestCase(false)]
+	[TestCase(true)]
+	public void ClosingBeforePostedShownShouldNotRaiseShown(bool dispose)
+	{
+		int lateShown = 0;
+		Run((app, finished) =>
+		{
+			var form = new Form { ClientSize = new Size(100, 100) };
+			bool closed = false;
+			form.Shown += (sender, e) =>
+			{
+				if (closed || form.IsDisposed)
+					lateShown++;
+			};
+			form.Show();
+			if (dispose)
+				form.Dispose();
+			else
+				form.Close();
+			closed = true;
+			app.AsyncInvoke(() =>
+			{
+				if (!form.IsDisposed)
+					form.Dispose();
+				finished();
+			});
+		});
+		Assert.That(lateShown, Is.Zero, "Shown must not run after a form closes or is disposed");
+	}
+
 	[Test, ManualTest]
 	public void WindowShouldCloseOnLostFocusWithoutHidingParent()
 	{
