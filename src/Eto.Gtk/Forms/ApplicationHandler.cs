@@ -37,12 +37,15 @@ namespace Eto.GtkSharp.Forms
 			Helper.UseHeaderBar = false;
 #endif
 			ThemeHandler.EnsureSystemDefaults();
-			_lastDetectedTheme = ThemeHandler.GetSystemThemeStyle(_portalColorScheme);
 			if (EtoEnvironment.Platform.IsLinux)
 			{
 				_systemTheme = new LinuxSystemTheme(OnPortalColorSchemeChanged, AsyncInvoke);
 				_systemTheme.Start();
+				_portalColorScheme = ThemeHandler.NormalizePortalColorScheme(LinuxSystemTheme.ReadColorScheme());
+				if (_portalColorScheme != null)
+					Gtk.Settings.Default.ApplicationPreferDarkTheme = _portalColorScheme == 1;
 			}
+			_lastDetectedTheme = ThemeHandler.GetSystemThemeStyle(_portalColorScheme);
 		}
 
 		void OnUnhandledException(GLib.UnhandledExceptionArgs e)

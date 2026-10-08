@@ -13,8 +13,10 @@ sealed class LinuxSystemTheme : IDisposable
 	const string DBusService = "org.freedesktop.DBus";
 	const string DBusPath = "/org/freedesktop/DBus";
 	const string DBusInterface = "org.freedesktop.DBus";
+	const int InitialReadTimeoutMs = 200;
 	const int ReadTimeoutMs = 5000;
 	const int SessionBus = 2;
+	const int NoAutoStart = 1;
 
 	[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 	delegate void DBusSignalCallback(IntPtr connection, IntPtr senderName, IntPtr objectPath,
@@ -36,6 +38,14 @@ sealed class LinuxSystemTheme : IDisposable
 
 	[DllImport(LibGio, CallingConvention = CallingConvention.Cdecl)]
 	static extern IntPtr g_dbus_connection_call_finish(IntPtr connection, IntPtr result, IntPtr error);
+
+	[DllImport(LibGio, CallingConvention = CallingConvention.Cdecl)]
+	static extern IntPtr g_bus_get_sync(int busType, IntPtr cancellable, IntPtr error);
+
+	[DllImport(LibGio, CallingConvention = CallingConvention.Cdecl)]
+	static extern IntPtr g_dbus_connection_call_sync(IntPtr connection, string busName, string objectPath,
+		string interfaceName, string methodName, IntPtr parameters, IntPtr replyType, int flags,
+		int timeoutMs, IntPtr cancellable, IntPtr error);
 
 	[DllImport(LibGio, CallingConvention = CallingConvention.Cdecl)]
 	static extern uint g_dbus_connection_signal_subscribe(IntPtr connection, string sender,
@@ -87,6 +97,39 @@ sealed class LinuxSystemTheme : IDisposable
 	{
 		_changed = changed;
 		_asyncInvoke = asyncInvoke;
+	}
+
+	// Windows created before the asynchronous read reports would otherwise open in the GTK default theme.
+	// This blocks startup, so it never waits for the portal to be activated, and it uses Read because every
+	// portal version implements it, which saves the second timeout a ReadOne fallback would cost.
+	internal static uint? ReadColorScheme()
+	{
+		var connection = IntPtr.Zero;
+		var reply = IntPtr.Zero;
+		try
+		{
+			connection = g_bus_get_sync(SessionBus, IntPtr.Zero, IntPtr.Zero);
+			if (connection == IntPtr.Zero)
+				return null;
+			using var namespaceValue = new GLib.Variant(AppearanceNamespace);
+			using var keyValue = new GLib.Variant(ColorSchemeKey);
+			using var parameters = GLib.Variant.NewTuple(new[] { namespaceValue, keyValue });
+			reply = g_dbus_connection_call_sync(connection, PortalService, PortalPath, SettingsInterface,
+				"Read", parameters.Handle, IntPtr.Zero, NoAutoStart, InitialReadTimeoutMs, IntPtr.Zero, IntPtr.Zero);
+			return GetVariantType(reply) == "(v)" ? GetUInt32Child(reply, 0) : null;
+		}
+		catch (Exception ex)
+		{
+			Trace(ex);
+			return null;
+		}
+		finally
+		{
+			if (reply != IntPtr.Zero)
+				g_variant_unref(reply);
+			if (connection != IntPtr.Zero)
+				g_object_unref(connection);
+		}
 	}
 
 	internal void Start()
