@@ -184,7 +184,17 @@ namespace Eto.GtkSharp.Drawing
 			{
 				if (family == null)
 				{
-					family = new FontFamily(familyName ?? Control.Family);
+					var name = familyName ?? Control.Family;
+					if (FontFamilyHandler.FindCorrectedFamily(name) == null)
+					{
+						// GtkSharp's LoadFont miscasts PangoCairoFcFont; wrap its owned native pointer directly.
+						var handle = NativeMethods.pango_context_load_font(FontsHandler.Context.Handle, Control.Handle);
+						if (handle != IntPtr.Zero)
+							using (var font = new Pango.Font(handle))
+							using (var description = font.Describe())
+								name = description?.Family ?? name;
+					}
+					family = new FontFamily(name);
 				}
 				return family;
 			}
