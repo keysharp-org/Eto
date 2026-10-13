@@ -1,12 +1,33 @@
 using Eto.Test.UnitTests;
 using NUnit.Framework;
 using Eto.Mac;
+using Eto.Mac.Drawing;
 
 namespace Eto.Test.Mac64.UnitTests
 {
 	[TestFixture]
 	public class IconTests : TestBase
 	{
+		[Test]
+		public void RecreatingOrDisposingShouldReleaseDeferredFrames() => Invoke(() =>
+		{
+			using var handler = new IconHandler();
+			using (var source = typeof(TestIcons).Assembly.GetManifestResourceStream("Eto.Test.Images.TestIcon.ico"))
+				handler.Create(source);
+			Assert.That(handler.Frames.Count(), Is.GreaterThan(1));
+
+			using (var source = typeof(TestIcons).Assembly.GetManifestResourceStream("Eto.Test.Images.Logo.png"))
+				handler.Create(source);
+			using var bitmap = TestIcons.LogoBitmap;
+			Assert.That(handler.Frames.Select(frame => frame.PixelSize),
+				Is.EqualTo(new[] { bitmap.Size }));
+
+			using (var source = typeof(TestIcons).Assembly.GetManifestResourceStream("Eto.Test.Images.TestIcon.ico"))
+				handler.Create(source);
+			handler.Dispose();
+			Assert.That(handler.Frames, Is.Null);
+		});
+
 		[Test]
 		public void BitmapToIconShouldNotChangeBitmapSize()
 		{

@@ -185,6 +185,14 @@ namespace Eto.GtkSharp.Forms
 					return;
 				}
 
+				// Packaged stock images are borrowed; only generated files belong to this indicator.
+				if (image.Properties.TryGetValue("Eto.Gtk.TrayImageFile", out var source)
+					&& source is string fileName && File.Exists(fileName))
+				{
+					app_indicator_set_icon(Control.Handle, fileName);
+					return;
+				}
+
 				imagePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".png");
 				image.ToGdk()?.Save(imagePath, "png");
 				app_indicator_set_icon(Control.Handle, imagePath);

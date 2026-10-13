@@ -4,6 +4,7 @@ namespace Eto.GtkSharp.Drawing
 	public class IconHandler : ImageHandler<Gtk.IconSet, Icon>, Icon.IHandler, IGtkPixbuf
 	{
 		readonly Dictionary<Size, Gdk.Pixbuf> sizes = new Dictionary<Size, Gdk.Pixbuf>();
+		Lazy<List<IconFrame>> _frames;
 
 		public Gdk.Pixbuf Pixbuf { get; set; }
 
@@ -11,29 +12,35 @@ namespace Eto.GtkSharp.Drawing
 
 		public void Create(Stream stream)
 		{
+			Create(stream, false);
+		}
+
+		// Trusted resources can postpone resolutions that GTK window and tray icons do not use.
+		public void CreateDeferred(Stream stream)
+		{
+			Create(stream, true);
+		}
+
+		void Create(Stream stream, bool deferFrames)
+		{
 			using (var ms = new MemoryStream())
 			{
 				stream.CopyTo(ms);
 				ms.Position = 0;
 				Pixbuf = new Gdk.Pixbuf(ms);
 				Control = new Gtk.IconSet(Pixbuf);
-				ms.Position = 0;
-				CreateFrames(ms);
+				var bytes = ms.ToArray();
+				_frames = new Lazy<List<IconFrame>>(() => GetFrames(bytes));
+				if (!deferFrames)
+					_ = _frames.Value;
+				ClearSizes();
 			}
 		}
 
 		public void Create(string fileName)
 		{
 			using (var fs = File.OpenRead(fileName))
-			using (var ms = new MemoryStream())
-			{
-				fs.CopyTo(ms);
-				ms.Position = 0;
-				Pixbuf = new Gdk.Pixbuf(ms);
-				Control = new Gtk.IconSet(Pixbuf);
-				ms.Position = 0;
-				CreateFrames(ms);
-			}
+				Create(fs);
 		}
 
 		const int sICONDIR = 6;            // sizeof(ICONDIR) 
@@ -42,8 +49,12 @@ namespace Eto.GtkSharp.Drawing
 
 		public Gdk.Pixbuf[] SplitIcon(MemoryStream input)
 		{
+			return SplitIcon(input.ToArray());
+		}
+
+		Gdk.Pixbuf[] SplitIcon(byte[] srcBuf)
+		{
 			// Get multiple .ico file image.
-			byte[] srcBuf = input.ToArray();
 			if (srcBuf.Length < sICONDIR)
 				throw new InvalidDataException("Icon not a valid format");
 
@@ -103,13 +114,15 @@ namespace Eto.GtkSharp.Drawing
 		}
 
 
-		void CreateFrames(MemoryStream input)
+		List<IconFrame> GetFrames(byte[] bytes)
 		{
-			frames = new List<IconFrame>();
-			foreach (var pb in SplitIcon(input))
+			var pixbufs = SplitIcon(bytes);
+			var frameList = new List<IconFrame>(pixbufs.Length);
+			foreach (var pb in pixbufs)
 			{
-				frames.Add(IconFrame.FromControlObject(1, new Bitmap(new BitmapHandler(pb))));
+				frameList.Add(IconFrame.FromControlObject(1, new Bitmap(new BitmapHandler(pb))));
 			}
+			return frameList;
 		}
 
 		#endregion
@@ -154,11 +167,21 @@ namespace Eto.GtkSharp.Drawing
 			pattern.Dispose();
 		}
 
+		void ClearSizes()
+		{
+			foreach (var pixbuf in sizes.Values)
+				pixbuf.Dispose();
+			sizes.Clear();
+		}
+
 		protected override void Dispose(bool disposing)
 		{
+			if (disposing)
+				_frames = null;
 			base.Dispose(disposing);
 			if (disposing)
 			{
+				ClearSizes();
 				if (Pixbuf != null)
 				{
 					Pixbuf.Dispose();
@@ -183,29 +206,24 @@ namespace Eto.GtkSharp.Drawing
 			return pixbuf;
 		}
 
-		List<IconFrame> frames;
 		public void Create(IEnumerable<IconFrame> frames)
 		{
-			this.frames = new List<IconFrame>(frames);
+			var frameList = frames.ToList();
+			_frames = new Lazy<List<IconFrame>>(() => frameList);
 			Control = new Gtk.IconSet();
-			foreach (var frame in this.frames)
+			foreach (var frame in frameList)
 			{
 				Control.AddSource(new Gtk.IconSource { Pixbuf = frame.Bitmap.ToGdk() });
 			}
-			Pixbuf = this.frames.FirstOrDefault(r => r.Scale == 1)?.Bitmap.ToGdk();
+			Pixbuf = frameList.FirstOrDefault(r => r.Scale == 1)?.Bitmap.ToGdk();
 			if (Pixbuf == null)
 			{
-				var frame = this.frames.OrderByDescending(r => r.Scale).FirstOrDefault();
+				var frame = frameList.OrderByDescending(r => r.Scale).FirstOrDefault();
 				Pixbuf = frame?.Bitmap.ToGdk().ScaleSimple(frame.Size.Width, frame.Size.Height, Gdk.InterpType.Bilinear);
 			}
+			ClearSizes();
 		}
 
-		public IEnumerable<IconFrame> Frames
-		{
-			get
-			{
-				return frames;
-			}
-		}
+		public IEnumerable<IconFrame> Frames => _frames?.Value;
 	}
 }

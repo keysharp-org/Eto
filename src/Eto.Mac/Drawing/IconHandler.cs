@@ -2,49 +2,60 @@ namespace Eto.Mac.Drawing
 {
 	public class IconHandler : ImageHandler<NSImage, Icon>, Icon.IHandler
 	{
-		List<IconFrame> _frames;
+		Lazy<List<IconFrame>> _frames;
+
 		public IconHandler()
 		{
 		}
 
 		public IconHandler(NSImage image)
 		{
+			SetImage(image);
+		}
+
+		void SetImage(NSImage image)
+		{
 			Control = image;
+			_frames = new Lazy<List<IconFrame>>(() => GetFrames(image));
 		}
 
 		public void Create(Stream stream)
 		{
 			var data = NSData.FromStream(stream);
-			Control = new NSImage(data);
+			SetImage(new NSImage(data));
 		}
 
 		public void Create(string fileName)
 		{
 			if (!File.Exists(fileName))
 				throw new FileNotFoundException(string.Format(CultureInfo.CurrentCulture, "Icon not found"), fileName);
-			Control = new NSImage(fileName);
+			SetImage(new NSImage(fileName));
 		}
 
-		IEnumerable<IconFrame> GetFrames()
+		List<IconFrame> GetFrames(NSImage image)
 		{
-			foreach (var rep in Control.Representations())
+			var representations = image.Representations();
+			var frameList = new List<IconFrame>(representations.Length);
+			foreach (var rep in representations)
 			{
 				var img = new NSImage();
 				img.AddRepresentation(rep);
-				yield return IconFrame.FromControlObject(1, new Bitmap(new BitmapHandler(img)));
+				frameList.Add(IconFrame.FromControlObject(1, new Bitmap(new BitmapHandler(img))));
 			}
+			return frameList;
 		}
 
 		public void Create(IEnumerable<IconFrame> frames)
 		{
-			_frames = frames.ToList();
+			var frameList = frames.ToList();
+			_frames = new Lazy<List<IconFrame>>(() => frameList);
 			var curScale = Screen.PrimaryScreen.LogicalPixelSize;
-			var item = _frames.FirstOrDefault(r => Math.Abs(r.Scale - curScale) < 0.0001) ?? _frames.First();
+			var item = frameList.FirstOrDefault(r => Math.Abs(r.Scale - curScale) < 0.0001) ?? frameList.First();
 
 			var size = Size.Ceiling((SizeF)item.PixelSize / (float)item.Scale).ToNS();
 
 			Control = new NSImage { Size = size };
-			foreach (var frame in _frames)
+			foreach (var frame in frameList)
 			{
 				var rep = (NSImageRep)frame.Bitmap.ToNS().Representations().First().Copy();
 
@@ -84,6 +95,13 @@ namespace Eto.Mac.Drawing
 			Control.Draw(destRect, sourceRect, NSCompositingOperation.SourceOver, 1, true, null);
 		}
 
-		public IEnumerable<IconFrame> Frames => _frames ?? (_frames = GetFrames().ToList());
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing)
+				_frames = null;
+			base.Dispose(disposing);
+		}
+
+		public IEnumerable<IconFrame> Frames => _frames?.Value;
 	}
 }
