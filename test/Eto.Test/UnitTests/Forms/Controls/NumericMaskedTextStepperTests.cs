@@ -194,14 +194,14 @@ namespace Eto.Test.UnitTests.Forms.Controls
 				var stepper = new TestStepper();
 				stepper.Value = V(1.5);
 				Assert.That(stepper.Value, Is.EqualTo(V(1.5)), "Value");
-				Assert.That(stepper.Text, Is.EqualTo("1.5"), "Text");
+				Assert.That(stepper.Text, Is.EqualTo(1.5.ToString(stepper.Culture)), "Text");
 
 				var valueChanged = 0;
 				stepper.ValueChanged += (sender, e) => valueChanged++;
 				stepper.MaximumDecimalPlaces = 2;
 				stepper.Value = V(1.256);
 				Assert.That(stepper.Value, Is.EqualTo(V(1.26)), "Value should be rounded");
-				Assert.That(stepper.Text, Is.EqualTo("1.26"), "Text should be rounded");
+				Assert.That(stepper.Text, Is.EqualTo(1.26.ToString(stepper.Culture)), "Text should be rounded");
 				Assert.That(valueChanged, Is.EqualTo(1), "ValueChanged");
 			});
 		}
@@ -218,7 +218,7 @@ namespace Eto.Test.UnitTests.Forms.Controls
 				stepper.PerformStep(StepperDirection.Up);
 				stepper.PerformStep(StepperDirection.Up);
 				Assert.That(stepper.Value, Is.EqualTo(V(1.5)), "Value");
-				Assert.That(stepper.Text, Is.EqualTo("1.5"), "Text");
+				Assert.That(stepper.Text, Is.EqualTo(1.5.ToString(stepper.Culture)), "Text");
 			});
 		}
 
@@ -231,7 +231,7 @@ namespace Eto.Test.UnitTests.Forms.Controls
 			{
 				var stepper = new TestStepper { DecimalPlaces = 2 };
 				stepper.Value = V(3);
-				Assert.That(stepper.Text, Is.EqualTo("3.00"), "Text");
+				Assert.That(stepper.Text, Is.EqualTo(3.ToString("F2", stepper.Culture)), "Text");
 				Assert.That(stepper.Value, Is.EqualTo(V(3)), "Value");
 			});
 		}
@@ -249,7 +249,7 @@ namespace Eto.Test.UnitTests.Forms.Controls
 				stepper.ValueChanged += (sender, e) => valueChanged++;
 
 				stepper.FormatString = "0.0";
-				Assert.That(stepper.Text, Is.EqualTo("2.3").Or.EqualTo("2.2"), "Text should use the format");
+				Assert.That(stepper.Text, Is.EqualTo(2.3.ToString(stepper.Culture)).Or.EqualTo(2.2.ToString(stepper.Culture)), "Text should use the format");
 				stepper.FormatString = null;
 				Assert.That(stepper.Value, Is.EqualTo(V(2.25)), "Value should keep its precision");
 				Assert.That(valueChanged, Is.EqualTo(0), "ValueChanged should not fire when only the format changes");
