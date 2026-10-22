@@ -423,6 +423,51 @@ public class ApplicationTests : TestBase
 		Assert.That(stopClicked, Is.True, "#1 - Must press the stop button to close the form");
 	}
 
+	[Test, InvokeOnUI]
+	public void RunIterationShouldDispatchAsyncInvoke()
+	{
+		// Work posted to the UI thread is part of the main loop on every platform, not only input
+		// events, so code that pumps with RunIteration while blocking the UI thread must see it arrive.
+		var called = false;
+		Application.Instance.AsyncInvoke(() => called = true);
+		var timeout = System.Diagnostics.Stopwatch.StartNew();
+		while (!called && timeout.ElapsedMilliseconds < 2000)
+			Application.Instance.RunIteration();
+		Assert.That(called, Is.True, "#1 - AsyncInvoke callback should be dispatched by RunIteration");
+	}
+
+	[Test, InvokeOnUI]
+	public void RunIterationShouldDispatchAllPendingWork()
+	{
+		// RunIteration drains what is pending rather than running a single pass of the loop: code that yields
+		// once expects everything already posted to the UI thread to have run when it gets control back.
+		var count = 0;
+		for (int i = 0; i < 3; i++)
+			Application.Instance.AsyncInvoke(() => count++);
+		Application.Instance.RunIteration();
+		Assert.That(count, Is.EqualTo(3), "#1 - every callback posted before RunIteration should have run");
+	}
+
+	[Test, InvokeOnUI]
+	public void RunIterationShouldFireDueTimers()
+	{
+		var elapsed = 0;
+		var timer = new UITimer { Interval = 0.01 };
+		timer.Elapsed += (sender, e) => elapsed++;
+		timer.Start();
+		try
+		{
+			var timeout = System.Diagnostics.Stopwatch.StartNew();
+			while (elapsed == 0 && timeout.ElapsedMilliseconds < 2000)
+				Application.Instance.RunIteration();
+		}
+		finally
+		{
+			timer.Stop();
+		}
+		Assert.That(elapsed, Is.GreaterThan(0), "#1 - a due UITimer should fire from RunIteration");
+	}
+
 	[Test]
 	public void EnsureUIThreadShouldThrow()
 	{

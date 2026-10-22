@@ -58,9 +58,13 @@ namespace Eto.GtkSharp.Forms
 
 		public void RunIteration()
 		{
-			var start = DateTime.Now;
-		    while (Gtk.Application.EventsPending() && (DateTime.Now - start).TotalMilliseconds < 100)
-				Gtk.Application.RunIteration();
+			// Dispatch what the main loop already has ready - events, due timeouts, idles - and never wait for more.
+			// Stay bounded (the Mac backend uses the same limit): it only matters when something keeps the loop
+			// from ever going idle, such as a source that re-arms itself or a flood of events, and then it is
+			// what hands control back to the caller instead of starving it.
+			var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency / 10;
+			while (Gtk.Application.EventsPending() && Stopwatch.GetTimestamp() < deadline)
+				Gtk.Application.RunIteration(false);
 		}
 
 		public void Restart()

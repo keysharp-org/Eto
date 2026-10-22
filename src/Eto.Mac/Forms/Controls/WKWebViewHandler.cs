@@ -324,6 +324,11 @@ namespace Eto.Mac.Forms.Controls
 			while (!task.IsCompleted)
 			{
 				Application.Instance.RunIteration();
+				if (task.IsCompleted)
+					break;
+				// RunIteration never waits, so wait here: run the loop until the next thing happens (the script's
+				// reply, input, a timer) or a short timeout, then go round to dispatch it.
+				NSRunLoop.Current.RunUntil(NSRunLoopMode.Default, NSDate.FromTimeIntervalSinceNow(0.01));
 			}
 
 			return task.Result;

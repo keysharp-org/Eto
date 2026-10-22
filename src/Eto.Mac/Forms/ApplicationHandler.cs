@@ -178,22 +178,46 @@ namespace Eto.Mac.Forms
 		static readonly IntPtr selNextEventMatchingMaskUntilDateInModeDequeue_Handle = Selector.GetHandle("nextEventMatchingMask:untilDate:inMode:dequeue:");
 		static readonly IntPtr selSendEvent_Handle = Selector.GetHandle("sendEvent:");
 
+		// How long one RunIteration may keep dispatching before handing control back, the same bound the Gtk
+		// backend uses. It only matters when something keeps the main loop from ever going idle (a source that
+		// re-arms itself, a flood of events): the pump never waits for work, so an idle loop returns at once.
+		static readonly long RunIterationTimeout = Stopwatch.Frequency / 10;
+
+#if MACOS_NET
+		static NSString DefaultRunLoopMode => CFRunLoop.ModeDefault;
+#else
+		static NSString DefaultRunLoopMode => CFRunLoop.CFDefaultRunLoopMode;
+#endif
+
 		public void RunIteration()
 		{
 			MacView.InMouseTrackingLoop = false;
-			// drain the event queue only for a short period of time so it doesn't lock up
-			var date = NSDate.FromTimeIntervalSinceNow(0.001);
+			// Dispatch what the main loop already has ready, as the other platforms do, and never wait for more.
+			var wasRunning = Control.Running;
+			var deadline = Stopwatch.GetTimestamp() + RunIterationTimeout;
 			for (; ; )
 			{
-				// dequeue the event
-				var evt = Control.NextEvent(NSEventMask.AnyEvent, date, NSRunLoopMode.Default, true);
+				// A callback may have stopped the app. Stop() posts a wake event so the outer Run() loop notices;
+				// leave it queued for that loop rather than dispatching it (or anything else) here.
+				if (wasRunning && !Control.Running)
+					return;
+				if (Stopwatch.GetTimestamp() >= deadline)
+					return;
 
-				// no event? cool, let's get out of here
-				if (evt == null)
-					break;
+				// dequeue the next event, without waiting for one
+				var evt = Control.NextEvent(NSEventMask.AnyEvent, NSDate.DistantPast, NSRunLoopMode.Default, true);
+				if (evt != null)
+				{
+					Control.SendEvent(evt);
+					continue;
+				}
 
-				// dispatch the event
-				Control.SendEvent(evt);
+				// Events are only part of the main loop: timers (UITimer), performSelectorOnMainThread (Invoke,
+				// AsyncInvoke), main queue blocks and async continuations are run loop sources, which the other
+				// backends' pumps dispatch too. Run the ones that are ready without waiting, and stop once a pass
+				// finds nothing to do. Handling a source can queue events, hence going round again.
+				if (CFRunLoop.Current.RunInMode(DefaultRunLoopMode, 0, true) != CFRunLoopExitReason.HandledSource)
+					return;
 			}
 		}
 
