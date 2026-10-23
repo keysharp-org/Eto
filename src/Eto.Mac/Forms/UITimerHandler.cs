@@ -41,7 +41,9 @@ namespace Eto.Mac.Forms
 		public void Start ()
 		{
 			Stop();
-			NSRunLoop.Current.AddTimer(Control, NSRunLoopMode.Default);
+			// The common modes include those modal dialogs and menu tracking run the loop in, so the timer keeps firing
+			// there as WinForms and GTK timers do.
+			NSRunLoop.Current.AddTimer(Control, NSRunLoopMode.Common);
 		}
 
 		public void Stop ()
