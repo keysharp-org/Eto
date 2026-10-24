@@ -1016,6 +1016,14 @@ namespace Eto.GtkSharp.Forms
 								if (gdkWindow.State.HasFlag(Gdk.WindowState.Iconified))
 									Control.Present();
 							}
+							else
+							{
+								// Before the window is realized these withdraw a fullscreen, maximize or minimize asked for
+								// earlier, which GTK would otherwise apply when the window is first shown.
+								Control.Unfullscreen();
+								Control.Unmaximize();
+								Control.Deiconify();
+							}
 							break;
 					}
 				}
