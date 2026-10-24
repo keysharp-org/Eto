@@ -936,7 +936,8 @@ namespace Eto.GtkSharp.Forms
 		// parent's coordinate space -- exactly what Eto's RectangleToScreen yields
 		// on Wayland (a toplevel's surface origin is 0,0). Returns false when this
 		// isn't a realized Wayland popup with a parent, so the caller falls back to
-		// absolute Move.
+		// absolute Move. GDK links a window to its parent only once both are realized,
+		// so a window whose parent is not yet realized maps as a toplevel.
 		bool TryMovePopupToRect(Point location)
 		{
 			if (!IsWaylandDisplay)
@@ -948,6 +949,9 @@ namespace Eto.GtkSharp.Forms
 				initialLocation = location;
 				return false;
 			}
+
+			if (!Control.TransientFor.IsRealized)
+				return false;
 
 			var rect = new NativeMethods.GdkRect { X = location.X, Y = location.Y, Width = 1, Height = 1 };
 			NativeMethods.gdk_window_move_to_rect(
