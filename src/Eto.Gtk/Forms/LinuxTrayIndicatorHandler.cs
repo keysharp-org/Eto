@@ -53,6 +53,27 @@ namespace Eto.GtkSharp.Forms
 		[DllImport(libgobject, CallingConvention = CallingConvention.Cdecl)]
 		static extern void g_object_unref(IntPtr obj);
 
+		[DllImport(libappindicator, CallingConvention = CallingConvention.Cdecl)]
+		static extern IntPtr app_indicator_get_type();
+
+		[DllImport(libgobject, CallingConvention = CallingConvention.Cdecl)]
+		static extern IntPtr g_type_class_ref(IntPtr type);
+
+		[DllImport(libgobject, CallingConvention = CallingConvention.Cdecl)]
+		static extern IntPtr g_type_parent(IntPtr type);
+
+		[DllImport(libgobject, CallingConvention = CallingConvention.Cdecl)]
+		static extern void g_type_query(IntPtr type, out GTypeQuery query);
+
+		[StructLayout(LayoutKind.Sequential)]
+		struct GTypeQuery
+		{
+			public IntPtr Type;
+			public IntPtr TypeName;
+			public uint ClassSize;
+			public uint InstanceSize;
+		}
+
 		static uint Id = 0;
 
 		public string Title
@@ -86,6 +107,7 @@ namespace Eto.GtkSharp.Forms
 #endif
 			
 			EnsureStatusNotifierWatcher();
+			DisableStatusIconFallback();
 
 			Control = GLib.Object.GetObject(app_indicator_new(Assembly.GetExecutingAssembly().FullName + Id, "", 0), true);
 			app_indicator_set_menu(Control.Handle, (new Gtk.Menu()).Handle);
@@ -154,6 +176,46 @@ namespace Eto.GtkSharp.Forms
 			{
 				if (connection != IntPtr.Zero)
 					g_object_unref(connection);
+			}
+		}
+
+		static bool fallbackChecked;
+
+		/// <summary>
+		/// Clears AppIndicatorClass.fallback on the Wayland backend. With no watcher, libappindicator falls back to
+		/// a GtkStatusIcon, which only GTK's X11 backend can show: on Wayland it has no widget, so it never appears
+		/// and every image update logs a gtk_widget_get_scale_factor critical. A cleared slot is the documented
+		/// override point, and the indicator still registers if a watcher turns up later.
+		/// </summary>
+		static void DisableStatusIconFallback()
+		{
+			if (fallbackChecked || !Helper.IsWaylandBackend)
+				return;
+
+			fallbackChecked = true;
+
+			try
+			{
+				var type = app_indicator_get_type();
+				g_type_query(g_type_parent(type), out var parent);
+				g_type_query(type, out var own);
+
+				// GObjectClass, then eight signal and reserved slots before fallback, unfallback and six more
+				// reserved: a class of any other size is a layout this does not know, so it is left alone.
+				var fallbackOffset = (int)parent.ClassSize + 8 * IntPtr.Size;
+
+				if (parent.ClassSize == 0 || own.ClassSize != fallbackOffset + 8 * IntPtr.Size)
+					return;
+
+				// The class stays referenced for the life of the process, as the indicators using it do.
+				var klass = g_type_class_ref(type);
+
+				if (klass != IntPtr.Zero)
+					Marshal.WriteIntPtr(klass, fallbackOffset, IntPtr.Zero);
+			}
+			catch
+			{
+				// A library without these exports keeps its own fallback.
 			}
 		}
 
