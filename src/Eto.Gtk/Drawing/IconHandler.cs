@@ -12,17 +12,6 @@ namespace Eto.GtkSharp.Drawing
 
 		public void Create(Stream stream)
 		{
-			Create(stream, false);
-		}
-
-		// Trusted resources can postpone resolutions that GTK window and tray icons do not use.
-		public void CreateDeferred(Stream stream)
-		{
-			Create(stream, true);
-		}
-
-		void Create(Stream stream, bool deferFrames)
-		{
 			using (var ms = new MemoryStream())
 			{
 				stream.CopyTo(ms);
@@ -30,10 +19,10 @@ namespace Eto.GtkSharp.Drawing
 				Pixbuf = new Gdk.Pixbuf(ms);
 				Control = new Gtk.IconSet(Pixbuf);
 				var bytes = ms.ToArray();
+				// Window and tray icons use only the primary image, so the frames are split on first request.
+				// The directory is still checked here so a malformed file fails in the constructor.
+				ValidateDirectory(bytes);
 				_frames = new Lazy<List<IconFrame>>(() => GetFrames(bytes));
-				if (!deferFrames)
-					_ = _frames.Value;
-				ClearSizes();
 			}
 		}
 
@@ -55,20 +44,13 @@ namespace Eto.GtkSharp.Drawing
 		Gdk.Pixbuf[] SplitIcon(byte[] srcBuf)
 		{
 			// Get multiple .ico file image.
-			if (srcBuf.Length < sICONDIR)
-				throw new InvalidDataException("Icon not a valid format");
-
-			var splitIcons = new List<Gdk.Pixbuf> ();
-			int count = BitConverter.ToInt16 (srcBuf, 4); // ICONDIR.idCount
-			if (count <= 0 || count > (srcBuf.Length - sICONDIR) / sICONDIRENTRY)
-				throw new InvalidDataException("Icon not a valid format");
+			int count = ValidateDirectory(srcBuf);
+			var splitIcons = new List<Gdk.Pixbuf>(count);
 
 			for (int i = 0; i < count; i++) {
 				int entryOffset = sICONDIR + sICONDIRENTRY * i;
 				int imgSize = BitConverter.ToInt32(srcBuf, entryOffset + 8); // ICONDIRENTRY.dwBytesInRes
 				int imgOffset = BitConverter.ToInt32(srcBuf, entryOffset + 12); // ICONDIRENTRY.dwImageOffset
-				if (imgOffset < 0 || imgSize < 0 || imgOffset > srcBuf.Length - imgSize)
-					throw new InvalidDataException("Icon not a valid format");
 
 				// PNG-compressed ICO entries are already complete images. Wrapping one in another ICO
 				// container makes GDK report "Compressed icons are not supported".
@@ -113,6 +95,26 @@ namespace Eto.GtkSharp.Drawing
 			return true;
 		}
 
+		// Checks the ICONDIR and every ICONDIRENTRY without decoding an image; returns the entry count.
+		static int ValidateDirectory(byte[] srcBuf)
+		{
+			if (srcBuf.Length < sICONDIR)
+				throw new InvalidDataException("Icon not a valid format");
+
+			int count = BitConverter.ToInt16(srcBuf, 4); // ICONDIR.idCount
+			if (count <= 0 || count > (srcBuf.Length - sICONDIR) / sICONDIRENTRY)
+				throw new InvalidDataException("Icon not a valid format");
+
+			for (int i = 0; i < count; i++)
+			{
+				int entryOffset = sICONDIR + sICONDIRENTRY * i;
+				int imgSize = BitConverter.ToInt32(srcBuf, entryOffset + 8); // ICONDIRENTRY.dwBytesInRes
+				int imgOffset = BitConverter.ToInt32(srcBuf, entryOffset + 12); // ICONDIRENTRY.dwImageOffset
+				if (imgOffset < 0 || imgSize < 0 || imgOffset > srcBuf.Length - imgSize)
+					throw new InvalidDataException("Icon not a valid format");
+			}
+			return count;
+		}
 
 		List<IconFrame> GetFrames(byte[] bytes)
 		{
@@ -167,13 +169,6 @@ namespace Eto.GtkSharp.Drawing
 			pattern.Dispose();
 		}
 
-		void ClearSizes()
-		{
-			foreach (var pixbuf in sizes.Values)
-				pixbuf.Dispose();
-			sizes.Clear();
-		}
-
 		protected override void Dispose(bool disposing)
 		{
 			if (disposing)
@@ -181,7 +176,9 @@ namespace Eto.GtkSharp.Drawing
 			base.Dispose(disposing);
 			if (disposing)
 			{
-				ClearSizes();
+				foreach (var scaled in sizes.Values)
+					scaled.Dispose();
+				sizes.Clear();
 				if (Pixbuf != null)
 				{
 					Pixbuf.Dispose();
@@ -221,7 +218,6 @@ namespace Eto.GtkSharp.Drawing
 				var frame = frameList.OrderByDescending(r => r.Scale).FirstOrDefault();
 				Pixbuf = frame?.Bitmap.ToGdk().ScaleSimple(frame.Size.Width, frame.Size.Height, Gdk.InterpType.Bilinear);
 			}
-			ClearSizes();
 		}
 
 		public IEnumerable<IconFrame> Frames => _frames?.Value;
