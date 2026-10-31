@@ -8,6 +8,7 @@ namespace Eto.Mac.Forms
 		bool _attached;
 		bool? _activateOnStartup;
 		bool _hasLaunched;
+		bool _stopPending;
 
 		internal static bool QueueResizing { get; set; }
 
@@ -193,17 +194,9 @@ namespace Eto.Mac.Forms
 		{
 			MacView.InMouseTrackingLoop = false;
 			// Dispatch what the main loop already has ready, as the other platforms do, and never wait for more.
-			var wasRunning = Control.Running;
 			var deadline = Stopwatch.GetTimestamp() + RunIterationTimeout;
-			for (; ; )
+			while (Stopwatch.GetTimestamp() < deadline)
 			{
-				// A callback may have stopped the app. Stop() posts a wake event so the outer Run() loop notices;
-				// leave it queued for that loop rather than dispatching it (or anything else) here.
-				if (wasRunning && !Control.Running)
-					return;
-				if (Stopwatch.GetTimestamp() >= deadline)
-					return;
-
 				// dequeue the next event, without waiting for one
 				var evt = Control.NextEvent(NSEventMask.AnyEvent, NSDate.DistantPast, NSRunLoopMode.Default, true);
 				if (evt != null)
@@ -217,8 +210,12 @@ namespace Eto.Mac.Forms
 				// backends' pumps dispatch too. Run the ones that are ready without waiting, and stop once a pass
 				// finds nothing to do. Handling a source can queue events, hence going round again.
 				if (CFRunLoop.Current.RunInMode(DefaultRunLoopMode, 0, true) != CFRunLoopExitReason.HandledSource)
-					return;
+					break;
 			}
+
+			// This pump may have dispatched the event that a stopped Run() is waiting for.
+			if (_stopPending)
+				PostWakeEvent();
 		}
 
 		public void Attach(object context)
@@ -261,6 +258,7 @@ namespace Eto.Mac.Forms
 				// Run the AppKit event loop. Unlike NSApplicationMain this can be called
 				// multiple times after Stop() stops the current loop.
 				Control.Run();
+				_stopPending = false;
 			}
 			else
 				Initialize(Control.Delegate as NSApplicationDelegate);
@@ -310,7 +308,13 @@ namespace Eto.Mac.Forms
 			}
 
 			// NSApp.Stop sets a flag; PostEvent ensures the loop processes it immediately.
+			_stopPending |= Control.Running;
 			Control.Stop(Control);
+			PostWakeEvent();
+		}
+
+		void PostWakeEvent()
+		{
 			Control.PostEvent(
 				NSEvent.OtherEvent(NSEventType.ApplicationDefined, new CGPoint(), (NSEventModifierMask)0, 0.0, 0, null, 0, 0, 0),
 				atStart: true);
