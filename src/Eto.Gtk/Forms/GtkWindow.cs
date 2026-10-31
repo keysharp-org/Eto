@@ -777,7 +777,7 @@ namespace Eto.GtkSharp.Forms
 					var windows = Gdk.Screen.Default.ToplevelWindows.Where(r => r.State != Gdk.WindowState.Withdrawn && r.WindowType != Gdk.WindowType.Temp).ToList();
 					// only terminate the application when closing the last window if there is a main form set,
 					// otherwise fall through so the Closed event still fires without quitting the run loop
-					if (windows.Count == 1 && ReferenceEquals(windows[0], Control.GetWindow()) && Application.Instance.MainForm != null)
+					if (windows.Count == 1 && ReferenceEquals(windows[0], Control.GetWindow()) && Application.Instance.MainForm?.Loaded == true)
 					{
 						var app = ((ApplicationHandler)Application.Instance.Handler);
 						// Fire Terminating so the app can veto QUITTING. Use a separate CancelEventArgs: a veto
@@ -798,7 +798,7 @@ namespace Eto.GtkSharp.Forms
 			{
 				Callback.OnClosed(Widget, EventArgs.Empty);
 				if (shouldQuit)
-					Gtk.Application.Quit();
+					ApplicationHandler.Instance.Stop();
 
 			}
 			return !args.Cancel;

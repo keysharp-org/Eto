@@ -157,6 +157,8 @@ namespace Eto
 		{
 			SETREDRAW = 0xB,
 
+			QUIT = 0x0012,
+
 			GETDLGCODE = 0x0087,
 
 			KEYDOWN = 0x0100,
@@ -481,6 +483,11 @@ namespace Eto
 
 		[DllImport("user32.dll", CharSet = CharSet.Auto)]
 		public static extern bool PeekMessage(ref swf.Message wMsg, IntPtr hwnd, int msgMin, int msgMax, int remove);
+
+		public const uint PM_REMOVE = 1;
+
+		[DllImport("user32.dll", CharSet = CharSet.Auto)]
+		public static extern bool PeekMessage(out MSG msg, IntPtr hwnd, WM msgMin, WM msgMax, uint remove);
 
 
 		public static swf.Message? GetNextMessage(swf.Control ctl, params WM[] wMsg)

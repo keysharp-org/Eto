@@ -6,6 +6,7 @@ namespace Eto.WinForms.Forms
 		string badgeLabel;
 		bool attached;
 		bool _optionsSet;
+		bool _stopRequested;
 		readonly Thread mainThread;
 		SynchronizationContext context;
 		swf.ApplicationContext applicationContext = new swf.ApplicationContext();
@@ -109,14 +110,25 @@ namespace Eto.WinForms.Forms
 			{
 				if (!_optionsSet)
 				{
-					if (!EtoEnvironment.Platform.IsMono)
-						swf.Application.DoEvents();
 					SetOptions();
 					_optionsSet = true;
 				}
 
+				_stopRequested = false;
 				Callback.OnInitialized(Widget, EventArgs.Empty);
-				swf.Application.Run(applicationContext);
+				// ExitThread only reaches a loop that is already running, and a closed main form can't start one.
+				if (!_stopRequested && applicationContext.MainForm?.IsDisposed != true)
+				{
+					swf.Application.Run(applicationContext);
+					// The message filters belong to the thread context that ended with the loop.
+					_optionsSet = false;
+					// WM_QUIT can be posted more than once, and a leftover would end the next Run at once.
+					while (Win32.PeekMessage(out _, IntPtr.Zero, Win32.WM.QUIT, Win32.WM.QUIT, Win32.PM_REMOVE))
+					{
+					}
+				}
+				// A finished loop leaves its ThreadExit handler on this one, and a skipped loop its closed main form.
+				applicationContext = new swf.ApplicationContext();
 			}
 			else
 			{
@@ -126,13 +138,18 @@ namespace Eto.WinForms.Forms
 
 		static readonly object SuppressKeyPressKey = new object();
 
-		void SetOptions()
+		void CreateContext()
 		{
 			// creates sync context
 			using (var ctl = new swf.Control())
 			{
 			}
 			context = SynchronizationContext.Current;
+		}
+
+		void SetOptions()
+		{
+			CreateContext();
 
 			_isActive = Win32.ApplicationIsActivated();
 
@@ -238,10 +255,16 @@ namespace Eto.WinForms.Forms
 				Invoke(Quit);
 				return;
 			}
-			foreach (swf.Form form in swf.Application.OpenForms.Cast<swf.Form>().ToList())
+			// The main form goes last, as closing it ends the loop whatever the other forms decide.
+			foreach (var form in swf.Application.OpenForms.Cast<swf.Form>().OrderBy(form => form == applicationContext.MainForm).ToList())
+			{
 				form.Close();
-			if (swf.Application.OpenForms.Count == 0)
-				applicationContext?.ExitThread();
+				// A modal form that accepted the close stays open until its own loop ends.
+				if (swf.Application.OpenForms.Cast<swf.Form>().Contains(form) && !(form.Modal && form.DialogResult != swf.DialogResult.None))
+					return;
+			}
+			_stopRequested = true;
+			applicationContext?.ExitThread();
 		}
 
 		public bool QuitIsSupported { get { return true; } }
@@ -283,6 +306,9 @@ namespace Eto.WinForms.Forms
 
 		public void AsyncInvoke(Action action)
 		{
+			// Not created in the constructor, as its window would block SetCompatibleTextRenderingDefault.
+			if (context == null && Thread.CurrentThread == mainThread)
+				CreateContext();
 			if (context != null)
 				context.Post(state => action(), null);
 		}

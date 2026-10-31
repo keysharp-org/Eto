@@ -419,8 +419,11 @@ namespace Eto.Wpf.Forms
 			var args = new CancelEventArgs { Cancel = e.Cancel };
 			Callback.OnClosing(Widget, args);
 			bool willShutDown = false;
+			bool endsRun = false;
 			if (sw.Application.Current.Dispatcher == Dispatcher.CurrentDispatcher)
 			{
+				// Run keeps an explicit ShutdownMode so it can run again, and ends with the main form instead.
+				endsRun = ApplicationHandler.Instance is { IsAttached: false } && ReferenceEquals(Widget, Application.Instance.MainForm);
 				willShutDown =
 					(
 						sw.Application.Current.ShutdownMode == sw.ShutdownMode.OnLastWindowClose
@@ -432,7 +435,7 @@ namespace Eto.Wpf.Forms
 					);
 			}
 
-			if (!args.Cancel && willShutDown)
+			if (!args.Cancel && (willShutDown || endsRun))
 			{
 				// last window closing, so call OnTerminating to let the app abort terminating.
 				// Use a separate CancelEventArgs so a veto (Cancel = true, "keep the app running") doesn't also

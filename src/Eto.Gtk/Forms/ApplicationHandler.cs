@@ -11,6 +11,7 @@ namespace Eto.GtkSharp.Forms
 		internal static List<string> TempFiles = new List<string>();
 
 		bool attached;
+		bool _stopRequested;
 		Gtk.StatusIcon statusIcon;
 		readonly List<ManualResetEvent> invokeResetEvents = new List<ManualResetEvent>();
 		LinuxSystemTheme _systemTheme;
@@ -300,6 +301,7 @@ namespace Eto.GtkSharp.Forms
 		{
 			//if (!Platform.IsWindows) Gdk.Threads.Init(); // do this in windows, and it stalls!  ugh
 			MainThreadID = Thread.CurrentThread.ManagedThreadId;
+			_stopRequested = false;
 
 			// Notification init is deferred to the first Notification.Show (see LinuxNotificationHandler.Init):
 			// it makes a synchronous D-Bus GetCapabilities call that can block for the full ~25s D-Bus timeout
@@ -308,7 +310,8 @@ namespace Eto.GtkSharp.Forms
 			Callback.OnInitialized(Widget, EventArgs.Empty);
 			if (!attached)
 			{
-				Gtk.Application.Run();
+				if (!_stopRequested)
+					Gtk.Application.Run();
 				lock (invokeResetEvents)
 				{
 					// set all invokes so threads will continue when run loop exits
@@ -360,7 +363,8 @@ namespace Eto.GtkSharp.Forms
 		public void Quit()
 		{
 			var args = new CancelEventArgs();
-			var mainForm = Widget.MainForm?.Handler as IGtkWindow;
+			// An earlier Run can leave its closed main form assigned, or the form may never have been shown.
+			var mainForm = Widget.MainForm is { Loaded: true } form ? form.Handler as IGtkWindow : null;
 			if (mainForm != null)
 				args.Cancel = !mainForm.CloseWindow(ce => Callback.OnTerminating(Widget, ce));
 			else
@@ -370,8 +374,20 @@ namespace Eto.GtkSharp.Forms
 			{
 				foreach (var window in Widget.Windows.Where(w => !ReferenceEquals(w, Widget.MainForm)).ToList())
 					window.Close();
-				Gtk.Application.Quit();
+				// CloseWindow only raises the events. Removing it after the others keeps them from seeing themselves as the last window.
+				mainForm?.Control.Hide();
+				mainForm?.Control.Unrealize();
+				if (!Widget.Windows.Any(window => window.Loaded))
+					Stop();
 			}
+		}
+
+		internal void Stop()
+		{
+			_stopRequested = true;
+			// Initialized runs before the main loop, which gtk_main_quit requires.
+			if (Gtk.Main.Level() > 0)
+				Gtk.Application.Quit();
 		}
 
 		public bool QuitIsSupported { get { return true; } }

@@ -405,15 +405,11 @@ public class Application : Widget
 	/// </summary>
 	/// <seealso cref="MainForm"/>
 	/// <param name="mainForm">Main form for the application.</param>
-	public virtual void Run(Form mainForm)
+	public virtual void Run(Form mainForm) => RunWith(() =>
 	{
-		Initialized += (sender, e) =>
-		{
-			MainForm = mainForm;
-			MainForm.Show();
-		};
-		Handler.Run();
-	}
+		MainForm = mainForm;
+		MainForm.Show();
+	});
 
 	/// <summary>
 	/// Runs the application with the specified <paramref name="dialog"/> and begins the main loop.
@@ -422,13 +418,20 @@ public class Application : Widget
 	/// When the dialog is closed, the application will exit.
 	/// </remarks>
 	/// <param name="dialog">Dialog to show for the application.</param>
-	public virtual void Run(Dialog dialog)
+	public virtual void Run(Dialog dialog) => RunWith(() =>
 	{
-		Initialized += (sender, e) =>
+		dialog.ShowModal();
+		Quit();
+	});
+
+	void RunWith(Action startup)
+	{
+		void OnStartup(object sender, EventArgs e)
 		{
-			dialog.ShowModal();
-			Quit();
-		};
+			Initialized -= OnStartup;
+			startup();
+		}
+		Initialized += OnStartup;
 		Handler.Run();
 	}
 

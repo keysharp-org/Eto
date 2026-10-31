@@ -10,6 +10,7 @@ public class ApplicationHandler : WidgetHandler<sw.Application, Application, App
 	List<FormHandler> _delayShownWindows;
 	Dispatcher _dispatcher;
 	DispatcherFrame _runFrame;
+	bool _stopRequested;
 	sw.Window _trackedMainWindow;
 	bool? _isActive;
 	ThemeStyle? _lastDetectedTheme;
@@ -48,6 +49,8 @@ public class ApplicationHandler : WidgetHandler<sw.Application, Application, App
 	internal List<FormHandler> DelayShownWindows => _delayShownWindows ??= new List<FormHandler>();
 
 	public bool IsStarted { get; private set; }
+
+	internal bool IsAttached => _attached;
 
 	sw.ResourceDictionary _themeResources;
 
@@ -110,7 +113,8 @@ public class ApplicationHandler : WidgetHandler<sw.Application, Application, App
 		{
 			foreach (var window in _delayShownWindows)
 			{
-				window.Show();
+				if (window.Widget.Loaded)
+					window.Show();
 			}
 			_delayShownWindows = null;
 		}
@@ -268,18 +272,23 @@ public class ApplicationHandler : WidgetHandler<sw.Application, Application, App
 
 	public void Quit()
 	{
-		bool cancel = false;
-		foreach (sw.Window window in Control.Windows.Cast<sw.Window>().ToList())
+		// Control.Windows also lists windows that were created but never shown, which a later Run can still show.
+		// A window whose show is still delayed isn't visible yet, but is open and can veto.
+		bool IsOpen(sw.Window window) => window.IsVisible || Widget.Windows.Any(w => w.Loaded && ReferenceEquals(w.ControlObject, window));
+
+		// The main form goes last, as closing it ends the Run whatever the other windows decide.
+		foreach (var window in Control.Windows.Cast<sw.Window>().Where(IsOpen).OrderBy(window => window == _trackedMainWindow).ToList())
 		{
 			window.Close();
-			cancel |= window.IsVisible;
+			if (IsOpen(window))
+				return;
 		}
-		if (!cancel)
-			Stop();
+		Stop();
 	}
 
 	void Stop()
 	{
+		_stopRequested = true;
 		var runFrame = _runFrame;
 		if (runFrame == null)
 			return;
@@ -420,17 +429,16 @@ public class ApplicationHandler : WidgetHandler<sw.Application, Application, App
 #if NET9_0_OR_GREATER
 		//		Control.ThemeMode = sw.ThemeMode.System;
 #endif
+		_stopRequested = false;
 		Callback.OnInitialized(Widget, EventArgs.Empty);
-		if (!_attached)
+		// Stop has no frame to exit during Initialized.
+		if (!_attached && !_stopRequested)
 		{
 			if (!IsStarted)
 				HandleStartup();
-			if (Widget.MainForm != null)
-			{
-				var mainWindow = (sw.Window)Widget.MainForm.ControlObject;
-				if (!mainWindow.IsVisible)
-					mainWindow.Show();
-			}
+			// Tracked only until it closes, as Widget.MainForm can still hold the closed form of an earlier Run.
+			if (_trackedMainWindow is { IsVisible: false })
+				_trackedMainWindow.Show();
 
 			_runFrame = new DispatcherFrame();
 			try
