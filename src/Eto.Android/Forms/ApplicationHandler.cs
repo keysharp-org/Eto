@@ -185,6 +185,8 @@ namespace Eto.Android.Forms
 			throw new NotImplementedException();
 		}
 
+		public void RunIteration(int millisecondsTimeout) => throw new NotImplementedException();
+
 		public Task<bool> RequestPermissionAsync(params String[] permissions)
 		{
 			var Request = new PermissionRequest(TopActivity, permissions);

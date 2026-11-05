@@ -91,6 +91,9 @@ public class ApplicationHandler : WidgetHandler<mux.Application, Application, Ap
 		//Dispatcher.PushFrame(frame);
 		//WpfFrameworkElementHelper.ShouldCaptureMouse = false;
 	}
+
+	// A blocking overload cannot be a no-op: callers waiting in a loop would spin.
+	public void RunIteration(int millisecondsTimeout) => throw new NotImplementedException();
 	
 	public Theme Theme { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
 }

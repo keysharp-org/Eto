@@ -63,6 +63,9 @@ namespace Eto.GtkSharp
 		[StructLayout(LayoutKind.Sequential)]
 		public struct GdkRect { public int X, Y, Width, Height; }
 
+		[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+		public delegate bool GSourceFunc(IntPtr data);
+
 
 
 		static class NMWindows
@@ -100,6 +103,7 @@ namespace Eto.GtkSharp
 			const string ext = "-0.dll";
 			const string extalt = ".dll";
 			const string libgobject = "libgobject-2.0" + ext;
+			const string libglib = "libglib-2.0" + ext;
 			const string libgtk = "libgtk-" + plat + ver + ext;
 			const string libgdk = "libgdk-" + plat + ver + ext;
 			const string libpango = "libpango-1.0" + ext;
@@ -111,6 +115,9 @@ namespace Eto.GtkSharp
 
 			[DllImport(libgobject, CallingConvention = CallingConvention.Cdecl)]
 			public extern static void g_signal_stop_emission_by_name(IntPtr instance, string name);
+
+			[DllImport(libglib, CallingConvention = CallingConvention.Cdecl)]
+			public extern static uint g_timeout_add(uint interval, GSourceFunc function, IntPtr data);
 
 			[DllImport(libwebkit, CallingConvention = CallingConvention.Cdecl)]
 			public extern static IntPtr webkit_web_view_new();
@@ -356,6 +363,7 @@ namespace Eto.GtkSharp
 			const string ext = ".so.0";
 			const string extalt = ".so.1";
 			const string libgobject = "libgobject-2.0" + ext;
+			const string libglib = "libglib-2.0" + ext;
 			const string libgtk = "libgtk-" + plat + ver + ext;
 			const string libgdk = "libgdk-" + plat + ver + ext;
 			const string libpango = "libpango-1.0" + ext;
@@ -367,6 +375,9 @@ namespace Eto.GtkSharp
 
 			[DllImport(libgobject, CallingConvention = CallingConvention.Cdecl)]
 			public extern static void g_signal_stop_emission_by_name(IntPtr instance, string name);
+
+			[DllImport(libglib, CallingConvention = CallingConvention.Cdecl)]
+			public extern static uint g_timeout_add(uint interval, GSourceFunc function, IntPtr data);
 
 			[DllImport(libwebkit, CallingConvention = CallingConvention.Cdecl)]
 			public extern static IntPtr webkit_web_view_new();
@@ -612,6 +623,7 @@ namespace Eto.GtkSharp
 			const string ext = ".dylib";
 			const string extalt = ".dylib";
 			const string libgobject = "libgobject-2.0" + ext;
+			const string libglib = "libglib-2.0" + ext;
 			const string libgtk = "libgtk-" + plat + ver + ext;
 			const string libgdk = "libgdk-" + plat + ver + ext;
 			const string libpango = "libpango-1.0" + ext;
@@ -623,6 +635,9 @@ namespace Eto.GtkSharp
 
 			[DllImport(libgobject, CallingConvention = CallingConvention.Cdecl)]
 			public extern static void g_signal_stop_emission_by_name(IntPtr instance, string name);
+
+			[DllImport(libglib, CallingConvention = CallingConvention.Cdecl)]
+			public extern static uint g_timeout_add(uint interval, GSourceFunc function, IntPtr data);
 
 			[DllImport(libwebkit, CallingConvention = CallingConvention.Cdecl)]
 			public extern static IntPtr webkit_web_view_new();
@@ -855,6 +870,16 @@ namespace Eto.GtkSharp
 				NMMac.g_signal_stop_emission_by_name(instance, name);
 			else
 				NMWindows.g_signal_stop_emission_by_name(instance, name);
+		}
+
+		public static uint g_timeout_add(uint interval, GSourceFunc function, IntPtr data)
+		{
+			if (EtoEnvironment.Platform.IsLinux)
+				return NMLinux.g_timeout_add(interval, function, data);
+			else if (EtoEnvironment.Platform.IsMac)
+				return NMMac.g_timeout_add(interval, function, data);
+			else
+				return NMWindows.g_timeout_add(interval, function, data);
 		}
 
 		public static bool gtk_clipboard_wait_for_targets(IntPtr cp, out IntPtr atoms, out int number)

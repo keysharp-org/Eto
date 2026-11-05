@@ -339,6 +339,21 @@ namespace Eto
 		[DllImport("user32.dll")]
 		public static extern IntPtr SetActiveWindow(IntPtr hWnd);
 
+		// Touch and pointer queue flags require Windows 8; the .NET Framework backend also supports older Windows.
+		static readonly uint AllInputWakeMask = Environment.OSVersion.Version >= new Version(6, 2) ? 0x1CFFu : 0x04FFu;
+		public const uint MWMO_INPUTAVAILABLE = 0x0004;
+
+		[DllImport("user32.dll", SetLastError = true)]
+		public static extern uint MsgWaitForMultipleObjectsEx(uint nCount, IntPtr pHandles, uint dwMilliseconds, uint dwWakeMask, uint dwFlags);
+
+		// Dispatcher work posts messages too. MWMO_INPUTAVAILABLE includes already-seen messages; -1 maps to INFINITE.
+		public static void WaitForMessage(int millisecondsTimeout)
+		{
+			if (millisecondsTimeout != 0 &&
+				MsgWaitForMultipleObjectsEx(0, IntPtr.Zero, unchecked((uint)millisecondsTimeout), AllInputWakeMask, MWMO_INPUTAVAILABLE) == uint.MaxValue)
+				throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+		}
+
 		public delegate bool EnumThreadProc(IntPtr hWnd, IntPtr lParam);
 
 		[DllImport("user32.dll")]

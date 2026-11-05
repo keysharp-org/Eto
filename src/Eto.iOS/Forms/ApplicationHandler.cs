@@ -159,5 +159,7 @@ namespace Eto.iOS.Forms
 		{
 			throw new NotImplementedException();
 		}
+
+		public void RunIteration(int millisecondsTimeout) => throw new NotImplementedException();
 	}
 }

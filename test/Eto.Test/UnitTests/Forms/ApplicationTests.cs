@@ -41,6 +41,41 @@ public class ApplicationTests : TestBase
 	static extern void g_variant_unref(IntPtr value);
 
 	[Test, InvokeOnUI]
+	public void RunIterationWaitShouldNotRepeatAnOuterTimeout()
+	{
+		if (!Platform.Instance.IsGtk)
+			Assert.Ignore("Only the GTK handler arms a timeout source that a nested iteration could inherit.");
+
+		var app = Application.Instance;
+		var iterations = 0;
+		var completed = false;
+		// Start after the outer wait arms its timeout; already-pending work takes the nonblocking path.
+		using var startNestedWait = new UITimer { Interval = 0.001 };
+		startNestedWait.Elapsed += (_, _) =>
+		{
+			startNestedWait.Stop();
+			var watch = Stopwatch.StartNew();
+			while (true)
+			{
+				var remaining = 350 - watch.ElapsedMilliseconds;
+				if (remaining <= 0)
+					break;
+				app.RunIteration((int)remaining);
+				iterations++;
+			}
+			completed = true;
+		};
+		startNestedWait.Start();
+
+		var deadline = Stopwatch.StartNew();
+		while (!completed && deadline.ElapsedMilliseconds < 2000)
+			app.RunIteration(10);
+
+		Assert.That(completed, Is.True);
+		Assert.That(iterations, Is.LessThan(15), "The outer 10 ms timeout must fire only once during a nested wait.");
+	}
+
+	[Test, InvokeOnUI]
 	public void ReinitializingWithNewPlatformShouldThrowException()
 	{
 		Assert.Throws<InvalidOperationException>(() =>
@@ -423,8 +458,8 @@ public class ApplicationTests : TestBase
 		Assert.That(stopClicked, Is.True, "#1 - Must press the stop button to close the form");
 	}
 
-	[Test, InvokeOnUI]
-	public void RunIterationShouldDispatchAsyncInvoke()
+	[TestCase(null), TestCase(0), TestCase(5000), InvokeOnUI]
+	public void RunIterationShouldDispatchAsyncInvoke(int? millisecondsTimeout)
 	{
 		// Work posted to the UI thread is part of the main loop on every platform, not only input
 		// events, so code that pumps with RunIteration while blocking the UI thread must see it arrive.
@@ -432,8 +467,127 @@ public class ApplicationTests : TestBase
 		Application.Instance.AsyncInvoke(() => called = true);
 		var timeout = System.Diagnostics.Stopwatch.StartNew();
 		while (!called && timeout.ElapsedMilliseconds < 2000)
-			Application.Instance.RunIteration();
+		{
+			if (millisecondsTimeout.HasValue)
+				Application.Instance.RunIteration(millisecondsTimeout.Value);
+			else
+				Application.Instance.RunIteration();
+		}
 		Assert.That(called, Is.True, "#1 - AsyncInvoke callback should be dispatched by RunIteration");
+		Assert.That(timeout.ElapsedMilliseconds, Is.LessThan(2000), "Pending work must not be followed by another wait.");
+	}
+
+	[Test, InvokeOnUI]
+	public void RunIterationWaitShouldReturnAfterNestedAsyncInvoke()
+	{
+		var app = Application.Instance;
+		var called = false;
+		app.AsyncInvoke(() =>
+		{
+			called = true;
+			app.RunIteration(0);
+		});
+
+		var watch = Stopwatch.StartNew();
+		while (!called && watch.ElapsedMilliseconds < 2000)
+			app.RunIteration(5000);
+		Assert.That(called, Is.True);
+		Assert.That(watch.ElapsedMilliseconds, Is.LessThan(2000), "A nested pump must not hide the callback dispatched by its outer pump.");
+	}
+
+	[TestCase(5000), TestCase(Timeout.Infinite), InvokeOnUI]
+	public void RunIterationWaitShouldWakeForAsyncInvoke(int millisecondsTimeout)
+	{
+		var app = Application.Instance;
+		var called = false;
+		var expired = false;
+		using var finished = new ManualResetEventSlim();
+		var poster = new Thread(() =>
+		{
+			if (finished.Wait(50))
+				return;
+			app.AsyncInvoke(() => called = true);
+			if (!finished.Wait(2000))
+				app.AsyncInvoke(() => expired = true);
+		}) { IsBackground = true };
+		poster.Start();
+		try
+		{
+			var watch = Stopwatch.StartNew();
+			while (!called && !expired)
+			{
+				var remaining = 5000 - watch.ElapsedMilliseconds;
+				if (remaining <= 0)
+					break;
+				app.RunIteration(millisecondsTimeout == Timeout.Infinite ? Timeout.Infinite : (int)remaining);
+			}
+			Assert.That(called, Is.True);
+			Assert.That(expired, Is.False, "The watchdog must not be needed to release the wait.");
+			Assert.That(watch.ElapsedMilliseconds, Is.LessThan(2000), "A new callback must wake the native wait.");
+		}
+		finally
+		{
+			finished.Set();
+			Assert.That(poster.Join(2000), Is.True);
+		}
+	}
+
+	[Test, InvokeOnUI]
+	public void RunIterationWaitShouldExpire()
+	{
+		var app = Application.Instance;
+		using var finished = new ManualResetEventSlim();
+		var guard = new Thread(() =>
+		{
+			if (!finished.Wait(2000))
+				app.AsyncInvoke(() => { });
+		}) { IsBackground = true };
+		guard.Start();
+		try
+		{
+			var watch = Stopwatch.StartNew();
+			var iterations = 0;
+			// Allow pending work and spurious wakes, but a quiet loop must eventually wait.
+			while (watch.ElapsedMilliseconds < 200 && iterations < 100)
+			{
+				app.RunIteration(50);
+				iterations++;
+			}
+			Assert.That(iterations, Is.LessThan(100), "An idle timed pump must not spin without waiting.");
+			Assert.That(watch.ElapsedMilliseconds, Is.LessThan(1000), "The wait must expire without a posted callback.");
+		}
+		finally
+		{
+			finished.Set();
+			Assert.That(guard.Join(2000), Is.True);
+		}
+	}
+
+	[TestCase(-2), TestCase(int.MinValue), InvokeOnUI]
+	public void RunIterationShouldRejectInvalidTimeout(int millisecondsTimeout)
+	{
+		Assert.Throws<ArgumentOutOfRangeException>(() => Application.Instance.RunIteration(millisecondsTimeout));
+	}
+
+	[TestCase(Timeout.Infinite), TestCase(0), TestCase(50), InvokeOnUI]
+	public void RunIterationWaitShouldRejectNonUiThread(int millisecondsTimeout)
+	{
+		var app = Application.Instance;
+		Exception failure = null;
+		var worker = new Thread(() =>
+		{
+			try
+			{
+				app.RunIteration(millisecondsTimeout);
+			}
+			catch (Exception ex)
+			{
+				failure = ex;
+			}
+		}) { IsBackground = true };
+		worker.Start();
+		Assert.That(worker.Join(2000), Is.True, "A call from another thread must fail before entering the native loop.");
+		Assert.That(failure, Is.TypeOf<UIThreadAccessException>());
 	}
 
 	[Test, InvokeOnUI]

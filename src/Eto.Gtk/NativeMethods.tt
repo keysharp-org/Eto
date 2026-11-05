@@ -16,6 +16,11 @@ var giomethods = new[]
 	"void g_signal_stop_emission_by_name(IntPtr instance, string name)"
 };
 
+var glibmethods = new[]
+{
+	"uint g_timeout_add(uint interval, GSourceFunc function, IntPtr data)"
+};
+
 var webkitmethods = new[]
 {
 	"IntPtr webkit_web_view_new()",
@@ -122,6 +127,7 @@ var fontconfigmethods = new []
 };
 
 var methods = giomethods
+	.Concat(glibmethods)
 	.Concat(gtkmethods)
 	.Concat(webkitmethods)
 	.Concat(javascriptcoremethods)
@@ -197,6 +203,9 @@ namespace Eto.GtkSharp
 		[StructLayout(LayoutKind.Sequential)]
 		public struct GdkRect { public int X, Y, Width, Height; }
 
+		[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+		public delegate bool GSourceFunc(IntPtr data);
+
 
 <#
 	for (int i = 0; i < pclass.Length; i++)
@@ -238,6 +247,7 @@ namespace Eto.GtkSharp
 			const string ext = "<#= ext[i] #>";
 			const string extalt = "<#= extalt[i] #>";
 			const string libgobject = "libgobject-2.0" + ext;
+			const string libglib = "libglib-2.0" + ext;
 			const string libgtk = "libgtk-" + plat + ver + ext;
 			const string libgdk = "libgdk-" + plat + ver + ext;
 			const string libpango = "libpango-1.0" + ext;
@@ -253,6 +263,16 @@ namespace Eto.GtkSharp
 
 			[DllImport(libgobject, CallingConvention = CallingConvention.Cdecl)]
 			public extern static <#= method.StartsWith("string") ? "IntPtr" + method.Substring(6) : method #>;
+<#
+		}
+#>
+<#
+		foreach (var method in glibmethods)
+		{
+#>
+
+			[DllImport(libglib, CallingConvention = CallingConvention.Cdecl)]
+			public extern static <#= method #>;
 <#
 		}
 #>

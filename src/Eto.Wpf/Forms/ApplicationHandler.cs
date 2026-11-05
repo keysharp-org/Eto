@@ -264,6 +264,12 @@ public class ApplicationHandler : WidgetHandler<sw.Application, Application, App
 		WpfFrameworkElementHelper.ShouldCaptureMouse = false;
 	}
 
+	public void RunIteration(int millisecondsTimeout)
+	{
+		Win32.WaitForMessage(millisecondsTimeout);
+		RunIteration();
+	}
+
 	static object ExitFrame(object f)
 	{
 		((DispatcherFrame)f).Continue = false;

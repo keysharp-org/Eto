@@ -9,6 +9,7 @@ namespace Eto.Mac.Forms
 		bool? _activateOnStartup;
 		bool _hasLaunched;
 		bool _stopRequested;
+		ulong _invokesDispatched;
 
 		internal static bool QueueResizing { get; set; }
 
@@ -153,12 +154,18 @@ namespace Eto.Mac.Forms
 			if (NSThread.IsMain)
 				action();
 			else
-				Control.InvokeOnMainThread(action);
+				Control.InvokeOnMainThread(action == null ? null : () => DispatchInvoke(action));
 		}
 
 		public void AsyncInvoke(Action action)
 		{
-			Control.BeginInvokeOnMainThread(action);
+			Control.BeginInvokeOnMainThread(action == null ? null : () => DispatchInvoke(action));
+		}
+
+		void DispatchInvoke(Action action)
+		{
+			_invokesDispatched++;
+			action();
 		}
 
 		public void Restart()
@@ -179,9 +186,7 @@ namespace Eto.Mac.Forms
 		static readonly IntPtr selNextEventMatchingMaskUntilDateInModeDequeue_Handle = Selector.GetHandle("nextEventMatchingMask:untilDate:inMode:dequeue:");
 		static readonly IntPtr selSendEvent_Handle = Selector.GetHandle("sendEvent:");
 
-		// How long one RunIteration may keep dispatching before handing control back, the same bound the Gtk
-		// backend uses. It only matters when something keeps the main loop from ever going idle (a source that
-		// re-arms itself, a flood of events): the pump never waits for work, so an idle loop returns at once.
+		// Bound the ready-work drain like Gtk so continuously re-armed sources cannot starve the caller.
 		static readonly long RunIterationTimeout = Stopwatch.Frequency / 10;
 
 #if MACOS_NET
@@ -190,11 +195,29 @@ namespace Eto.Mac.Forms
 		static NSString DefaultRunLoopMode => CFRunLoop.CFDefaultRunLoopMode;
 #endif
 
-		public void RunIteration()
+		public void RunIteration() => DispatchReady();
+
+		public void RunIteration(int millisecondsTimeout)
 		{
+			if (DispatchReady() || millisecondsTimeout == 0)
+				return;
+
+			// Window-server sources queue events, which still need dispatching after the wait.
+			// CFRunLoop treats a timeout beyond its timer limit as infinite.
+			var seconds = millisecondsTimeout < 0 ? double.MaxValue : millisecondsTimeout / 1000.0;
+			CFRunLoop.Current.RunInMode(DefaultRunLoopMode, seconds, true);
+			DispatchReady();
+		}
+
+		// Never waits. A pending stop must also return control so the outer Run() can observe its wake event.
+		bool DispatchReady()
+		{
+			// This may run repeatedly inside one callback, before AppKit drains the caller's pool.
+			using var pool = new NSAutoreleasePool();
 			MacView.InMouseTrackingLoop = false;
-			// Dispatch what the main loop already has ready, as the other platforms do, and never wait for more.
 			var deadline = Stopwatch.GetTimestamp() + RunIterationTimeout;
+			var invokesDispatched = _invokesDispatched;
+			var dispatched = false;
 			while (Stopwatch.GetTimestamp() < deadline)
 			{
 				// dequeue the next event, without waiting for one
@@ -202,6 +225,7 @@ namespace Eto.Mac.Forms
 				if (evt != null)
 				{
 					Control.SendEvent(evt);
+					dispatched = true;
 					continue;
 				}
 
@@ -211,11 +235,14 @@ namespace Eto.Mac.Forms
 				// finds nothing to do. Handling a source can queue events, hence going round again.
 				if (CFRunLoop.Current.RunInMode(DefaultRunLoopMode, 0, true) != CFRunLoopExitReason.HandledSource)
 					break;
+				dispatched = true;
 			}
 
 			// This pump may have dispatched the event that a stopped Run() is waiting for.
 			if (_stopRequested)
 				PostWakeEvent();
+			// NextEvent can run Invoke/AsyncInvoke callbacks even when it returns no NSEvent.
+			return dispatched || _invokesDispatched != invokesDispatched || _stopRequested;
 		}
 
 		public void Attach(object context)

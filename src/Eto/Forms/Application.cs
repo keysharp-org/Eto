@@ -597,6 +597,34 @@ public class Application : Widget
 	public void RunIteration() => Handler.RunIteration();
 
 	/// <summary>
+	/// Advanced. Pumps the main UI loop, waiting when no work is ready.
+	/// </summary>
+	/// <remarks>
+	/// Must be called on the UI thread. Dispatches ready events and <see cref="Invoke(Action)"/>/<see cref="AsyncInvoke(Action)"/>
+	/// calls, waiting for work only when none is ready. May return early without dispatching work, including after
+	/// <see cref="Quit()"/>; callers waiting for a condition must recheck it and their remaining timeout.
+	/// The timeout limits the idle wait, not time spent in callbacks. Timers run but may not end the wait on every platform.
+	/// Prefer asynchronous calls via Task.Run or threads instead of blocking the UI thread.
+	/// </remarks>
+	/// <param name="millisecondsTimeout">How long to wait in milliseconds, or <see cref="Timeout.Infinite"/> to wait
+	/// until something arrives. Zero does not wait, the same as <see cref="RunIteration()"/>.</param>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="millisecondsTimeout"/> is less than <see cref="Timeout.Infinite"/>.</exception>
+	/// <exception cref="UIThreadAccessException">The calling thread is not the UI thread.</exception>
+	public void RunIteration(int millisecondsTimeout)
+	{
+		if (millisecondsTimeout < Timeout.Infinite)
+			throw new ArgumentOutOfRangeException(nameof(millisecondsTimeout));
+
+		if (!IsUIThread)
+			throw new UIThreadAccessException("RunIteration must be called on the UI thread.");
+
+		if (millisecondsTimeout == 0)
+			Handler.RunIteration();
+		else
+			Handler.RunIteration(millisecondsTimeout);
+	}
+
+	/// <summary>
 	/// Restarts the application
 	/// </summary>
 	public void Restart() => Handler.Restart();
@@ -825,7 +853,14 @@ public class Application : Widget
 		/// This is not recommended to use and you should use asynchronous calls instead via Task.Run or threads.
 		/// </remarks>
 		void RunIteration();
-			
+
+		/// <summary>
+		/// Pumps the main UI loop, waiting up to <paramref name="millisecondsTimeout"/> milliseconds (or until woken for
+		/// <see cref="Timeout.Infinite"/>) when no work is ready. May return early without dispatching work.
+		/// <see cref="Application"/> validates the calling thread and that the timeout is at least -1.
+		/// </summary>
+		void RunIteration(int millisecondsTimeout);
+
 		/// <summary>
 		/// Gets a value indicating that the application is currently the active application
 		/// </summary>

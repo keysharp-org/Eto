@@ -18,6 +18,11 @@ namespace Eto.GtkSharp.Forms
 		ThemeStyle? _lastDetectedTheme;
 		uint? _portalColorScheme;
 		bool _themeNotificationsAttached;
+		static readonly NativeMethods.GSourceFunc waitTimeoutElapsed = data =>
+		{
+			Marshal.WriteInt32(data, 1);
+			return false;
+		};
 
 		public static ApplicationHandler Instance => Eto.Forms.Application.Instance?.Handler as ApplicationHandler;
 		internal uint? PortalColorScheme => _portalColorScheme;
@@ -66,6 +71,30 @@ namespace Eto.GtkSharp.Forms
 			var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency / 10;
 			while (Gtk.Application.EventsPending() && Stopwatch.GetTimestamp() < deadline)
 				Gtk.Application.RunIteration(false);
+		}
+
+		public unsafe void RunIteration(int millisecondsTimeout)
+		{
+			if (millisecondsTimeout != 0 && !Gtk.Application.EventsPending())
+			{
+				// One static callback avoids a managed proxy and native thunk per wait. It returns false because a repeating
+				// source would keep waking any iteration nested inside this one at this cadence. The flag can live on the
+				// stack: the callback runs only on this thread, and the finally removes an unfired source before the frame returns.
+				var fired = 0;
+				var timeout = millisecondsTimeout > 0 ? NativeMethods.g_timeout_add((uint)millisecondsTimeout, waitTimeoutElapsed, (IntPtr)(&fired)) : 0;
+
+				try
+				{
+					Gtk.Application.RunIteration(true);
+				}
+				finally
+				{
+					if (timeout != 0 && fired == 0)
+						GLib.Source.Remove(timeout);
+				}
+			}
+
+			RunIteration();
 		}
 
 		public void Restart()

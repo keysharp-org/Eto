@@ -62,6 +62,16 @@ namespace Eto.WinForms.Forms
 			swf.Application.DoEvents();
 		}
 
+		public void RunIteration(int millisecondsTimeout)
+		{
+			// A standalone pump needs a target for worker Invoke and AsyncInvoke calls before it waits.
+			if (context == null)
+				CreateContext();
+
+			Win32.WaitForMessage(millisecondsTimeout);
+			RunIteration();
+		}
+
 		public void Restart()
 		{
 			swf.Application.Restart();
