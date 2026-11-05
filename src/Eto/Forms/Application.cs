@@ -253,12 +253,13 @@ public class Application : Widget
 		windows.Add(window);
 	}
 
-	void HandleClosed(object sender, EventArgs e)
+	void HandleClosed(object sender, EventArgs e) => RemoveWindow((Window)sender);
+
+	// A disposed window can no longer close, so it leaves the list here instead.
+	internal void RemoveWindow(Window window)
 	{
-		var window = (Window)sender;
 		window.Closed -= HandleClosed;
-		if (windows.Contains(window))
-			windows.Remove(window);
+		windows.Remove(window);
 	}
 
 	/// <summary>

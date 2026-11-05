@@ -9,6 +9,25 @@ public class FormTests : WindowTests<Form>
 	protected override void Show(Form window) => window.Show();
 	protected override Task ShowAsync(Form window) => window.ShowAsync();
 
+	[Test]
+	public void DisposingWithoutClosingShouldLeaveApplicationWindows()
+	{
+		// Quit stops the loop once no listed window is loaded, and a disposed window cannot be closed to get it off the list.
+		var listedWhileShown = false;
+		var listedAfterDispose = true;
+		Run((app, finished) =>
+		{
+			var form = new Form { ClientSize = new Size(100, 100) };
+			form.Show();
+			listedWhileShown = app.Windows.Contains(form);
+			form.Dispose();
+			listedAfterDispose = app.Windows.Contains(form);
+			finished();
+		});
+		Assert.That(listedWhileShown, Is.True, "A shown form is an open window");
+		Assert.That(listedAfterDispose, Is.False, "A disposed form is no longer an open window");
+	}
+
 	[TestCase(false)]
 	[TestCase(true)]
 	public void ClosingBeforePostedShownShouldNotRaiseShown(bool dispose)
