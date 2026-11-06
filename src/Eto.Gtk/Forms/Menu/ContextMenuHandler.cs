@@ -144,16 +144,46 @@ namespace Eto.GtkSharp.Forms.Menu
 		public void Show(Control relativeTo, PointF? location)
 		{
 			Prepare();
-			if (location != null)
-			{
-				showLocation = relativeTo?.PointToScreen(location.Value) ?? location;
-				Control.Popup(null, null, PopupMenuPosition, 3u, Gtk.Global.CurrentEventTime);
-			}
-			else
+
+			if (location == null)
 			{
 				showLocation = null;
-				Control.Popup();
+
+				var trigger = Gtk.Global.CurrentEvent;
+				try
+				{
+					if (trigger?.Window != null)
+						Control.PopupAtPointer(trigger);
+					// Deferred callbacks have no event; GDK still knows which local surface holds the pointer.
+					else if (Gdk.Display.Default?.DefaultSeat?.Pointer is Gdk.Device pointer
+						&& pointer.GetWindowAtPosition(out var x, out var y) is Gdk.Window window)
+						Control.PopupAtRect(window, new Gdk.Rectangle(x, y, 1, 1),
+							Gdk.Gravity.SouthEast, Gdk.Gravity.NorthWest, trigger);
+					else
+						Control.Popup();
+				}
+				finally
+				{
+					if (trigger != null)
+						Gdk.EventHelper.Free(trigger);
+				}
+
+				return;
 			}
+
+			// Subtracting the same GDK origin leaves a surface-relative point, including on Wayland.
+			var widget = relativeTo?.GetContainerWidget();
+			if (widget?.Toplevel?.GetWindow() is Gdk.Window toplevelWindow)
+			{
+				var point = relativeTo.PointToScreen(location.Value);
+				toplevelWindow.GetOrigin(out var originX, out var originY);
+				Control.PopupAtRect(toplevelWindow, new Gdk.Rectangle((int)(point.X - originX), (int)(point.Y - originY), 1, 1),
+					Gdk.Gravity.NorthWest, Gdk.Gravity.NorthWest, null);
+				return;
+			}
+
+			showLocation = relativeTo?.PointToScreen(location.Value) ?? location;
+			Control.Popup(null, null, PopupMenuPosition, 3u, Gtk.Global.CurrentEventTime);
 		}
 
 		void PopupMenuPosition(Gtk.Menu menu, out int x, out int y, out bool push_in)
