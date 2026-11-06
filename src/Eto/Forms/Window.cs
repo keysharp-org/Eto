@@ -694,6 +694,7 @@ public abstract class Window : Panel
 	/// <returns>The callback instance to use for this widget</returns>
 	protected override object GetCallback() { return callback; }
 
+	/// <inheritdoc/>
 	protected override void Dispose(bool disposing)
 	{
 		// Quit stops the loop once no listed window is loaded, and a disposed window stays loaded because Close returns early for it.
