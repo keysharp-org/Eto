@@ -10,6 +10,7 @@ namespace Eto.GtkSharp.Forms.Menu
 		where TWidget: ButtonMenuItem
 		where TCallback: ButtonMenuItem.ICallback
 	{
+		string text;
 		string tooltip;
 		Keys shortcut;
 		Image image;
@@ -62,11 +63,16 @@ namespace Eto.GtkSharp.Forms.Menu
 
 		public string Text
 		{
-			get { return label.Text; }
+			get { return text ?? string.Empty; }
 			set
 			{
-				label.Text = value.ToPlatformMnemonic();
-				label.UseUnderline = true;
+				// The same text again is a no-op, so a caller refreshing every item does not relayout or notify each label.
+				if (text == value)
+					return;
+				text = value;
+				// One call: gtk_label_set_text clears use-underline, and anything mirroring the label, such as
+				// libdbusmenu's tray export, would snapshot the mnemonic underscore as literal text.
+				label.TextWithMnemonic = value.ToPlatformMnemonic();
 			}
 		}
 
