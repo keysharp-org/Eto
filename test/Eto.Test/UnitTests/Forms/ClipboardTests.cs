@@ -7,23 +7,27 @@ namespace Eto.Test.UnitTests.Forms
 		protected override bool IsClipboard => true;
 
 		[Test]
-		public void ImageShouldSurviveSourceDisposal()
+		public void ImageShouldSurviveSourceDisposal() => Invoke(() =>
 		{
-			Invoke(() =>
+			using var clipboard = new Clipboard();
+			clipboard.Clear();
+			try
 			{
-				using var clipboard = new Clipboard();
-				clipboard.Clear();
-				using var expected = TestIcons.TestImage;
-
-				using (var source = new Bitmap(expected))
+				using (var source = new Bitmap(1, 1, PixelFormat.Format32bppRgba))
+				{
+					source.SetPixel(0, 0, Colors.Red);
 					clipboard.Image = source;
-
-				using var result = clipboard.Image;
-				Assert.That(result, Is.Not.Null);
-				Assert.That(result.Size, Is.EqualTo(expected.Size));
+				}
+				clipboard.Text = "Hello";
+				using var result = clipboard.Image as Bitmap;
+				Assert.That(result?.GetPixel(0, 0), Is.EqualTo(Colors.Red));
+				Assert.That(clipboard.Text, Is.EqualTo("Hello"));
+			}
+			finally
+			{
 				clipboard.Clear();
-			});
-		}
+			}
+		});
 	}
 
 	[TestFixture]

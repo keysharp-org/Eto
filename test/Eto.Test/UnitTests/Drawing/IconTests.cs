@@ -4,6 +4,17 @@ namespace Eto.Test.UnitTests.Drawing
 	[TestFixture]
 	public class IconTests : TestBase
 	{
+		[Test]
+		public void DisposingIconShouldPreserveSourceBitmap() => Invoke(() =>
+		{
+			using var bitmap = new Bitmap(20, 20, PixelFormat.Format32bppRgba);
+			using var icon = new Icon(1, bitmap);
+			icon.Dispose();
+			Assert.That(bitmap.Size, Is.EqualTo(new Size(20, 20)));
+			bitmap.SetPixel(0, 0, Colors.Red);
+			Assert.That(bitmap.GetPixel(0, 0), Is.EqualTo(Colors.Red));
+		});
+
 		[TestCase(.25f, .5f)]
 		[TestCase(1f, 1f)]
 		[TestCase(1.5f, 1.5f)]
@@ -47,43 +58,14 @@ namespace Eto.Test.UnitTests.Drawing
 			Assert.That(icon.Frames.All(r => r.Scale == 1), Is.True, "#4");
 		}
 
-		[Test]
-		public void IconFromIcoShouldSupportPngCompressedFrames()
+		[TestCase("TestIconPng.ico", new[] { 256 })]
+		[TestCase("TestIconMixed.ico", new[] { 16, 256 })]
+		public void IconFromIcoShouldSupportPngCompressedFrames(string resourceName, int[] sizes)
 		{
-			var dibIcon = ReadResource("Eto.Test.Images.TestIcon.ico");
-			var png = ReadResource("Eto.Test.Images.TestImage.png");
-			const int headerSize = 6;
-			const int entrySize = 16;
-			const int frameCount = 2;
-			var dibSize = BitConverter.ToInt32(dibIcon, headerSize + 8);
-			var dibOffset = BitConverter.ToInt32(dibIcon, headerSize + 12);
-			var dataOffset = headerSize + entrySize * frameCount;
-
-			using var stream = new MemoryStream();
-			using var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true);
-			writer.Write(dibIcon, 0, headerSize - 2);
-			writer.Write((short)frameCount);
-			writer.Write(dibIcon, headerSize, entrySize - 4);
-			writer.Write(dataOffset);
-			writer.Write((byte)128); // width
-			writer.Write((byte)128); // height
-			writer.Write((byte)0); // color count
-			writer.Write((byte)0); // reserved
-			writer.Write((short)1); // color planes
-			writer.Write((short)32); // bits per pixel
-			writer.Write(png.Length);
-			writer.Write(dataOffset + dibSize);
-			writer.Write(dibIcon, dibOffset, dibSize);
-			writer.Write(png);
-			writer.Flush();
-			stream.Position = 0;
-
+			using var stream = GetType().Assembly.GetManifestResourceStream($"Eto.Test.Images.{resourceName}");
 			using var icon = new Icon(stream);
-			Assert.That(icon.Frames.Select(r => r.PixelSize), Is.EquivalentTo(new[]
-			{
-				new Size(16, 16),
-				new Size(128, 128)
-			}));
+			Assert.That(icon.Frames.Select(r => r.PixelSize),
+				Is.EquivalentTo(sizes.Select(size => new Size(size, size))));
 		}
 
 		[Test]
@@ -217,14 +199,6 @@ namespace Eto.Test.UnitTests.Drawing
 
 				return imageView;
 			});
-		}
-
-		byte[] ReadResource(string name)
-		{
-			using var source = GetType().Assembly.GetManifestResourceStream(name);
-			using var destination = new MemoryStream();
-			source.CopyTo(destination);
-			return destination.ToArray();
 		}
 	}
 }

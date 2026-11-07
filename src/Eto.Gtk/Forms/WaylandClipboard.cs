@@ -912,7 +912,7 @@ namespace Eto.GtkSharp.Forms
 				};
 				FillInterface(ifManager, p + "manager_v1", 1, mgrMethods, null);
 
-				// device: requests set_selection(?o), destroy(); events data_offer(n), selection(?o), finished()
+				// device: requests set_selection(?o), destroy()
 				var devMethods = new[]
 				{
 					Msg("set_selection", "?o", ifSource),
@@ -925,7 +925,7 @@ namespace Eto.GtkSharp.Forms
 					Msg("data_offer", "n", ifOffer),
 					Msg("selection", "?o", ifOffer),
 					Msg("finished", "", null),
-					Msg("primary_selection", "?o", ifOffer)
+					Msg("primary_selection", ext ? "?o" : "2?o", ifOffer)
 				};
 				FillInterface(ifDevice, p + "device_v1", 1, devMethods, devEvents);
 

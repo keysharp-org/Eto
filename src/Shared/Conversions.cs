@@ -6,13 +6,6 @@
 	/// </summary>
 	public static partial class Conversions
 	{
-		static Regex _platformMnemonic;
-
-		/// <summary>
-		/// The regex for mnemonic strings to be converted to a platform
-		/// </summary>
-		internal static Regex PlatformMnemonic => _platformMnemonic ?? (_platformMnemonic = new Regex(@"(?<=([^&](?:[&]{2})*)|^)[&](?![&])", RegexOptions.Compiled));
-
 		/// <summary>
 		/// Translates degrees to radians.
 		/// </summary>
@@ -66,21 +59,15 @@
 			return value.Replace("__", "_");
 		}
 
-		/// <summary>
-		/// Finds the mnemonic marker the way <see cref="PlatformMnemonic"/> matches one: the last marker of the first
-		/// odd-length run of markers, except a run of three or more at the start, whose pairs have no other character
-		/// before them. A compiled Regex costs about 10 ms the first time a menu or button text is set.
-		/// </summary>
-		static int FindMnemonic(string value, char marker)
+		internal static int FindMnemonic(string value, char marker)
 		{
-			for (int i = 0; i < value.Length; i++)
+			for (int i = value.IndexOf(marker); i >= 0; i = value.IndexOf(marker, i + 1))
 			{
-				if (value[i] != marker)
-					continue;
-				int start = i;
+				var start = i;
 				while (i + 1 < value.Length && value[i + 1] == marker)
 					i++;
-				if (((i - start) & 1) == 0 && (start > 0 || i == 0))
+				// A leading run containing escaped pairs remains literal for compatibility.
+				if ((i - start) % 2 == 0 && (start > 0 || i == 0))
 					return i;
 			}
 			return -1;

@@ -58,11 +58,8 @@ namespace Eto.GtkSharp.Forms.Controls
 
 		public override string Text
 		{
-			// Return the exact value last assigned rather than round-tripping through the GTK label.
-			// Setting a single "&" makes ToPlatformMnemonic() turn it into a "_" mnemonic that the label
-			// no longer reports back, so the getter would otherwise lose the ampersand - which breaks
-			// callers that match a tab by its exact assigned name.
-			get { return text ?? string.Empty; }
+			// Gtk.Label.Text omits mnemonic markers and unescapes literals, so retain the assigned title.
+			get { return text; }
 			set
 			{
 				text = value ?? string.Empty;

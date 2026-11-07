@@ -25,7 +25,7 @@ namespace Eto.Mac.Forms.Controls
 
 			public override bool AcceptsFirstMouse(NSEvent theEvent)
 			{
-				return (Handler as IMacViewHandler)?.OnAcceptsFirstMouse(theEvent) ?? base.AcceptsFirstMouse(theEvent);
+				return (WeakHandler?.Target as IMacViewHandler)?.OnAcceptsFirstMouse(theEvent) ?? base.AcceptsFirstMouse(theEvent);
 			}
 		}
 

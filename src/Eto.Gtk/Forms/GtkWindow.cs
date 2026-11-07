@@ -774,7 +774,7 @@ namespace Eto.GtkSharp.Forms
 					closing(args);
 				else
 				{
-					var windows = Gdk.Screen.Default.ToplevelWindows.Where(r => r.State != Gdk.WindowState.Withdrawn && r.WindowType != Gdk.WindowType.Temp).ToList();
+					var windows = Gdk.Screen.Default.ToplevelWindows.Where(r => !r.State.HasFlag(Gdk.WindowState.Withdrawn) && r.WindowType != Gdk.WindowType.Temp).ToList();
 					// only terminate the application when closing the last window if there is a main form set,
 					// otherwise fall through so the Closed event still fires without quitting the run loop
 					if (windows.Count == 1 && ReferenceEquals(windows[0], Control.GetWindow()) && Application.Instance.MainForm is { IsDisposed: false, Loaded: true })
@@ -907,21 +907,28 @@ namespace Eto.GtkSharp.Forms
 			{
 				if (Control.IsMapped)
 				{
+					var size = Size;
 					UserPreferredSize = value.Size;
-					// Wayland popups anchor through a dedicated position-only path; resize them separately.
-					if (TryMovePopupToRect(value.Location))
+					// Wayland popups require separate resize and positioning operations.
+					if (!IsWaylandDisplay)
 					{
-						if (value.Size != Size)
-							Control.GetWindow().Resize(value.Width, value.Height);
+						var gdkWindow = Control.GetWindow();
+						if (value.Size != size)
+							gdkWindow.MoveResize(value.X, value.Y, value.Width, value.Height);
+						else
+							gdkWindow.Move(value.X, value.Y);
+						return;
 					}
-					else
+					if (value.Size != size)
 					{
-						// A single gdk_window_move_resize is one X ConfigureWindow request, so a live geometry
-						// change (e.g. a zooming overlay that moves and resizes every frame) never exposes an
-						// intermediate new-size/old-position frame the way a separate Resize + Move pair does.
-						// This is the same GdkWindow operation the separate path used, just combined atomically.
-						Control.GetWindow().MoveResize(value.X, value.Y, value.Width, value.Height);
+						// if the size is different, resize the window and wait for the size to be applied
+						Control.GetWindow().Resize(value.Width, value.Height);
+						while (Gtk.Application.EventsPending())
+							Gtk.Application.RunIteration();
 					}
+
+					if (!TryMovePopupToRect(value.Location))
+						Control.GetWindow().Move(value.X, value.Y);
 					return;
 				}
 				Size = value.Size;
@@ -950,6 +957,7 @@ namespace Eto.GtkSharp.Forms
 				return false;
 			}
 
+			// GDK links the native transient parent only after realization.
 			if (!Control.TransientFor.IsRealized)
 				return false;
 
@@ -1018,8 +1026,7 @@ namespace Eto.GtkSharp.Forms
 							}
 							else
 							{
-								// Before the window is realized these withdraw a fullscreen, maximize or minimize asked for
-								// earlier, which GTK would otherwise apply when the window is first shown.
+								// Cancel state requests that GTK saves until the window is shown.
 								Control.Unfullscreen();
 								Control.Unmaximize();
 								Control.Deiconify();

@@ -1,4 +1,4 @@
-﻿using Eto.GtkSharp.Drawing;
+using Eto.GtkSharp.Drawing;
 
 namespace Eto.GtkSharp.Forms
 {
@@ -61,14 +61,7 @@ namespace Eto.GtkSharp.Forms
 		private static bool allowactions;
 		private static MethodInfo activatedmethod;
 
-		// Initialize libnotify lazily (on the first notification Show) instead of eagerly from
-		// Application.Run. notify_get_server_caps() is a SYNCHRONOUS D-Bus call to
-		// org.freedesktop.Notifications; when that name is unowned and resolves to a slow or broken
-		// activatable service - e.g. a mixed GNOME+KDE install where the KDE "plasma_waitforname" stub
-		// shadows the name and waits ~25s for a plasmashell that never comes - the call blocks for the
-		// full D-Bus timeout. Calling it from Run() froze every application launch on the main thread
-		// for that entire timeout. Deferring it here keeps startup off the notification bus, so only
-		// apps that actually post a notification ever touch it. Idempotent and thread-safe.
+		// Capability queries can block while the notification service starts; probe only on first use.
 		public static void Init()
 		{
 			lock (initLock)
@@ -80,7 +73,10 @@ namespace Eto.GtkSharp.Forms
 
 				try
 				{
-					notify_init(Assembly.GetExecutingAssembly().FullName);
+					if (!notify_init(Assembly.GetExecutingAssembly().FullName))
+						return;
+
+					allowactions = false;
 
 					var list = new GLib.List(notify_get_server_caps(), typeof(string));
 					foreach (var item in list)
@@ -114,8 +110,15 @@ namespace Eto.GtkSharp.Forms
 
 		public static void DeInit()
 		{
-			if (init)
-				notify_uninit();
+			lock (initLock)
+			{
+				if (init)
+				{
+					notify_uninit();
+					init = false;
+					initAttempted = false;
+				}
+			}
 		}
 
 		Image _contentImage;

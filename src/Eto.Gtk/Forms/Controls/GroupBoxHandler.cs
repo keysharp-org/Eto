@@ -15,11 +15,9 @@ namespace Eto.GtkSharp.Forms.Controls
 			get { return Control.Label; }
 			set
 			{
-				// A frame has no label widget until a label is set, so anything styling that widget has to be
-				// deferred until here and re-applied.
-				var needsStyle = Control.LabelWidget == null;
+				// GTK replaces the label when the title changes, so reapply assigned styles.
 				Control.Label = value;
-				if (needsStyle && Control.LabelWidget is Gtk.Widget label)
+				if (Control.LabelWidget is Gtk.Widget label)
 				{
 					if (Widget.Properties.ContainsKey(GtkControl.Font_Key))
 						label.SetFont(Font.ToPango());
@@ -31,7 +29,7 @@ namespace Eto.GtkSharp.Forms.Controls
 
 		public override Size ClientSize {
 			get {
-				if (Control.Visible && Control.Child != null)
+				if (Control.IsRealized && Control.Child != null)
 					return Control.Child.Allocation.Size.ToEto ();
 				else {
 					var label = Control.LabelWidget;

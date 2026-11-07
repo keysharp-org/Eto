@@ -21,48 +21,45 @@ namespace Eto.Mac.Forms
 		[DllImport(Constants.CoreFoundationLibrary)]
 		static extern void CFRelease(IntPtr handle);
 
+		const int kCGEventSourceStateCombinedSessionState = 0;
+
+		[DllImport(Constants.CoreGraphicsLibrary)]
+		[return: MarshalAs(UnmanagedType.I1)]
+		static extern bool CGEventSourceButtonState(int stateID, uint button);
+
 		public void SetCursor(Cursor cursor) => cursor.ToNS().Set();
 
 		public Eto.Drawing.PointF Position
 		{
 			get
 			{
-				// Read the pointer through CoreGraphics rather than NSEvent.CurrentMouseLocation + NSScreen:
-				// those touch AppKit (NSScreen in particular is main-thread-only) and raise an
-				// AppKitThreadAccessException when Mouse.Position is queried off the main thread. CGEvent reports
-				// the location in the same top-left, point-based global display space, and is thread-safe.
+				// Avoid AppKit's main-thread requirement when reading the cursor position.
 				var handle = CGEventCreate(IntPtr.Zero);
 				if (handle == IntPtr.Zero)
-					return Eto.Drawing.PointF.Empty;
+					throw new InvalidOperationException("Could not get the current mouse position.");
 				try
 				{
-					var location = CGEventGetLocation(handle);
-					return new Eto.Drawing.PointF((float)location.X, (float)location.Y);
+					return CGEventGetLocation(handle).ToEto();
 				}
 				finally
 				{
 					CFRelease(handle);
 				}
 			}
-			set
-			{
-				// CGWarpMouseCursorPosition already takes top-left, point-based global coordinates, which is what
-				// PointF carries here — no NSScreen-based flip needed (and none was applied before).
-				CGWarpMouseCursorPosition(value.ToNS());
-			}
+			set => CGWarpMouseCursorPosition(value.ToNS());
 		}
 
 		public MouseButtons Buttons
 		{
 			get
 			{
-				var current = NSEvent.CurrentPressedMouseButtons;
+				// Avoid AppKit's main-thread requirement when reading the button state.
 				var buttons = MouseButtons.None;
-				if ((current & 1) != 0)
+				if (CGEventSourceButtonState(kCGEventSourceStateCombinedSessionState, 0))
 					buttons |= MouseButtons.Primary;
-				if ((current & 2) != 0)
+				if (CGEventSourceButtonState(kCGEventSourceStateCombinedSessionState, 1))
 					buttons |= MouseButtons.Alternate;
-				if ((current & 4) != 0)
+				if (CGEventSourceButtonState(kCGEventSourceStateCombinedSessionState, 2))
 					buttons |= MouseButtons.Middle;
 				return buttons;
 			}

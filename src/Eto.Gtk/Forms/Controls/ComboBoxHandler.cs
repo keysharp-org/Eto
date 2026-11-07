@@ -101,7 +101,7 @@ namespace Eto.GtkSharp.Forms.Controls
 			get { return base.Size; }
 			set
 			{
-				// An entry left at width-chars -1 floors the combo at GTK's 150px entry minimum, so an explicit width would be ignored.
+				// Allow explicit widths below GTK's default entry minimum.
 				entry.WidthChars = (value.Width == -1) ? -1 : 0;
 				base.Size = value;
 			}

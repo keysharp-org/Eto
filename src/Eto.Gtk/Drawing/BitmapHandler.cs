@@ -184,10 +184,6 @@ namespace Eto.GtkSharp.Drawing
 		{
 			var pixbuf = image.ToGdk();
 			Control = pixbuf.ScaleSimple(width, height, interpolation.ToGdk());
-			// Carry the alpha channel through the copy. Without this, Alpha defaults to false, so a later draw on
-			// this bitmap picks Cairo.Format.Rgb24 (no alpha) instead of Argb32 — which is why copying an image and
-			// drawing on it (e.g. Overlay.SetImage of a rendered, partly-transparent bitmap) produced an OPAQUE fill
-			// with black where the source was transparent.
 			Alpha = Control.HasAlpha;
 		}
 
@@ -427,7 +423,7 @@ namespace Eto.GtkSharp.Drawing
 			var r = (uint)(byte)(argb);
 			if (a > 0)
 			{
-				// Rounding keeps Cairo's quantized channels stable when the pixbuf is drawn again.
+				// Round to preserve Cairo's premultiplied channels across conversions.
 				b = (b * 255 + a / 2) / a;
 				g = (g * 255 + a / 2) / a;
 				r = (r * 255 + a / 2) / a;

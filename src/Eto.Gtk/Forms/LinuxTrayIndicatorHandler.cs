@@ -8,6 +8,7 @@ namespace Eto.GtkSharp.Forms
 	{
 		const string libappindicator = "libappindicator3.so.1";
 		const string libgio = "libgio-2.0.so.0";
+		const string libglib = "libglib-2.0.so.0";
 		const string libgobject = "libgobject-2.0.so.0";
 		Image image;
 		string imagePath;
@@ -37,18 +38,19 @@ namespace Eto.GtkSharp.Forms
 		[DllImport(libappindicator, CallingConvention = CallingConvention.Cdecl)]
 		public extern static void app_indicator_dispose(IntPtr gobject);
 
-		// GError is deliberately not used below: this is best-effort, a NULL GError** is legal and means "don't
-		// report", and it keeps this off the error-freeing path entirely. A NULL return is all it needs to know.
 		[DllImport(libgio, CallingConvention = CallingConvention.Cdecl)]
-		static extern IntPtr g_bus_get_sync(int bus_type, IntPtr cancellable, IntPtr error);
+		static extern IntPtr g_bus_get_sync(GLib.BusType busType, IntPtr cancellable, IntPtr error);
 
-		// A NULL callback makes this fire-and-forget: glib sends the call with NO_REPLY_EXPECTED and returns
-		// without waiting for anything. Auto-start is a separate message flag, so the bus still starts the
-		// service.
 		[DllImport(libgio, CallingConvention = CallingConvention.Cdecl)]
-		static extern void g_dbus_connection_call(IntPtr connection, string bus_name, string object_path,
-			string interface_name, string method_name, IntPtr parameters, IntPtr reply_type, int flags,
-			int timeout_msec, IntPtr cancellable, IntPtr callback, IntPtr user_data);
+		static extern IntPtr g_dbus_connection_call_sync(IntPtr connection, string busName, string objectPath,
+			string interfaceName, string methodName, IntPtr parameters, IntPtr replyType, GLib.DBusCallFlags flags,
+			int timeoutMs, IntPtr cancellable, ref IntPtr error);
+
+		[DllImport(libgio, CallingConvention = CallingConvention.Cdecl)]
+		static extern int g_dbus_error_quark();
+
+		[DllImport(libglib, CallingConvention = CallingConvention.Cdecl)]
+		static extern void g_variant_unref(IntPtr value);
 
 		[DllImport(libgobject, CallingConvention = CallingConvention.Cdecl)]
 		static extern void g_object_unref(IntPtr obj);
@@ -76,6 +78,9 @@ namespace Eto.GtkSharp.Forms
 
 		static uint Id = 0;
 
+		// The standard name libappindicator waits for, then the one Cinnamon's watcher is activatable under.
+		static readonly string[] WatcherNames = { "org.kde.StatusNotifierWatcher", "org.x.StatusNotifierWatcher" };
+
 		public string Title
 		{
 			get { return app_indicator_get_title(Control.Handle); }
@@ -85,7 +90,13 @@ namespace Eto.GtkSharp.Forms
 		public bool Visible
 		{
 			get { return app_indicator_get_status(Control.Handle) == 1; }
-			set { app_indicator_set_status(Control.Handle, value ? 1 : 0); }
+			set
+			{
+				// A watcher is only needed once an icon is wanted, and asking on each Show restarts one that has died since.
+				if (value)
+					Task.Run(EnsureStatusNotifierWatcher);
+				app_indicator_set_status(Control.Handle, value ? 1 : 0);
+			}
 		}
 
 		public LinuxTrayIndicatorHandler()
@@ -93,7 +104,7 @@ namespace Eto.GtkSharp.Forms
 #if NET
 			DllImportResolverManager.Add((name, assembly, path) =>
 			{
-				if (name == libappindicator) 
+				if (name == libappindicator)
 				{
 					IntPtr result = IntPtr.Zero;
 					if (!NativeLibrary.TryLoad("libayatana-appindicator3.so.1", assembly, path, out result))
@@ -105,72 +116,51 @@ namespace Eto.GtkSharp.Forms
 				return IntPtr.Zero;
 			});
 #endif
-			
-			EnsureStatusNotifierWatcher();
+
 			DisableStatusIconFallback();
 
+			// app_indicator_new transfers its native reference to the caller.
 			Control = GLib.Object.GetObject(app_indicator_new(Assembly.GetExecutingAssembly().FullName + Id, "", 0), true);
 			app_indicator_set_menu(Control.Handle, (new Gtk.Menu()).Handle);
 
 			Id++;
 		}
 
-		const int GBusTypeSession = 2;
-		// Nothing waits on the reply, so this only bounds how long the bus holds the message before dropping it.
-		const int ActivateTimeoutMs = 5000;
-
-		// The name libappindicator looks for, and the one to ask for where a desktop makes it activatable.
-		const string KdeWatcher = "org.kde.StatusNotifierWatcher";
-		// Cinnamon's xapp-sn-watcher is activatable under this name instead, and merely ACQUIRES org.kde. once
-		// running, so asking for org.kde. alone fails with "not provided by any .service files" and starts
-		// nothing at all.
-		const string XAppWatcher = "org.x.StatusNotifierWatcher";
-
-		static bool watcherActivationTried;
-
 		/// <summary>
-		/// Asks the bus to start the desktop's StatusNotifier host, which is often not running at all: Cinnamon's
-		/// xapp-sn-watcher ships D-Bus ACTIVATABLE and exits again once nothing needs it, so whether a tray icon
-		/// appears comes down to whether anything has asked for one recently.
-		/// <para>
-		/// It matters because of what libappindicator does when no watcher answers: it falls back to a legacy
-		/// XEmbed tray icon, and a Wayland session has nowhere to put one, so the icon never appears at all with
-		/// nothing logged to say why. Starting the watcher is the difference between an icon and no icon, not
-		/// merely between one transport and another.
-		/// </para>
-		/// <para>
-		/// Any method call on an activatable name asks the bus to start it, so Peer.Ping is used: it takes no
-		/// arguments, so there is no GVariant to build. Nothing waits, for the reply or for the watcher, because
-		/// nothing needs to: libappindicator watches NameOwnerChanged for the watcher's name and registers
-		/// itself whenever it turns up. A session whose watcher had gone idle therefore gets its icon a couple
-		/// of seconds late, once, rather than never. Entirely best-effort: no watcher, no bus, or any failure at
-		/// all changes nothing.
-		/// </para>
+		/// Asks the bus to start the StatusNotifier watcher if it is activatable but not running. Any call to an
+		/// activatable name starts its service, and Peer.Ping takes no arguments. Nothing waits for the result:
+		/// libappindicator watches the standard name and registers when it appears.
 		/// </summary>
 		static void EnsureStatusNotifierWatcher()
 		{
-			if (watcherActivationTried)
-				return;
-
-			watcherActivationTried = true;
-
 			var connection = IntPtr.Zero;
-
 			try
 			{
-				connection = g_bus_get_sync(GBusTypeSession, IntPtr.Zero, IntPtr.Zero);
-
+				connection = g_bus_get_sync(GLib.BusType.Session, IntPtr.Zero, IntPtr.Zero);
 				if (connection == IntPtr.Zero)
 					return;
 
-				// Either name may be the activatable one; asking for a name nobody provides simply goes nowhere,
-				// and asking for one already running is answered and discarded.
-				Activate(connection, KdeWatcher);
-				Activate(connection, XAppWatcher);
+				foreach (var busName in WatcherNames)
+				{
+					var error = IntPtr.Zero;
+					var reply = g_dbus_connection_call_sync(connection, busName, "/StatusNotifierWatcher",
+						"org.freedesktop.DBus.Peer", "Ping", IntPtr.Zero, IntPtr.Zero, GLib.DBusCallFlags.None, 5000, IntPtr.Zero, ref error);
+					if (reply != IntPtr.Zero)
+					{
+						g_variant_unref(reply);
+						return;
+					}
+					// Only a name with no service at all moves on to the next; a running but unresponsive watcher is left alone.
+					if (error == IntPtr.Zero)
+						return;
+					var failure = new GLib.GException(error);
+					if (failure.Domain != g_dbus_error_quark() || failure.Code != (int)GLib.DBusError.ServiceUnknown)
+						return;
+				}
 			}
 			catch
 			{
-				// No libgio, no session bus, no watcher: fall through to whatever the indicator would have done.
+				// Watcher activation is optional; retain libappindicator's existing fallback.
 			}
 			finally
 			{
@@ -218,11 +208,6 @@ namespace Eto.GtkSharp.Forms
 				// A library without these exports keeps its own fallback.
 			}
 		}
-
-		static void Activate(IntPtr connection, string busName) =>
-			g_dbus_connection_call(connection, busName, "/StatusNotifierWatcher",
-				"org.freedesktop.DBus.Peer", "Ping", IntPtr.Zero, IntPtr.Zero, 0,
-				ActivateTimeoutMs, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
 
 		void RemoveTempImage()
 		{

@@ -145,7 +145,7 @@ namespace Eto.GtkSharp.Forms
 
 		public virtual Size Size
 		{
-			get => ContainerControl.Visible ? ContainerControl.Allocation.Size.ToEto() : UserPreferredSize;
+			get => ContainerControl.Visible && ContainerControl.IsRealized ? ContainerControl.Allocation.Size.ToEto() : UserPreferredSize;
 			set
 			{
 				var userPreferredSize = UserPreferredSize;
@@ -393,6 +393,9 @@ namespace Eto.GtkSharp.Forms
 		protected override void Initialize()
 		{
 			base.Initialize();
+			// Controls are visible by default on other platforms; windows are shown explicitly.
+			if (!(ContainerControl is Gtk.Window))
+				ContainerControl.Show();
 			DragControl.DragDataReceived += Connector.HandleDragDataReceived;
 			DragControl.DragDataGet += Connector.HandleDragDataGet;
 			HandleEvent(Eto.Forms.Control.SizeChangedEvent);
@@ -841,11 +844,7 @@ namespace Eto.GtkSharp.Forms
 				return handler.IsEventHandled(Drawable.TextCompositionEvent) || handler.IsEventHandled(Drawable.TextInsertionBoundsRequestedEvent);
 			}
 
-			// Eto's own IM context should only intercept key input for controls that actually
-			// consume it - custom TextInput handlers or Drawable composition. Native text widgets
-			// (TextBox/TextArea/Entry) have their own IM handling; routing their keys through this
-			// IMMulticontext as well swallows the first keystroke after focus until the control is
-			// re-focused. This gates both focus-in and key filtering on the same condition.
+			// Native widgets handle their own input; key handlers alone do not need an extra context.
 			bool ShouldUseInputContext(GtkControl<TControl, TWidget, TCallback> handler)
 				=> handler.IsEventHandled(Eto.Forms.Control.TextInputEvent) || HandlesDrawableComposition(handler);
 			
@@ -1343,35 +1342,27 @@ namespace Eto.GtkSharp.Forms
 			return new PointF(point.X + origin.X, point.Y + origin.Y);
 		}
 
-		/// <summary>
-		/// Where this widget's own (0,0) sits on screen. Both conversions above are expressed through it so
-		/// they stay exact inverses of one another.
-		/// </summary>
-		/// <remarks>
-		/// gtk_widget_translate_coordinates is the reliable way to locate a widget: gtk_widget_get_window
-		/// answers with whichever ancestor owns a window, so how much of the widget's own offset that origin
-		/// already carries depends on the widget, and an unrealized widget has no window to ask at all — it
-		/// reported the screen's corner. Translating to the toplevel and adding that window's origin is
-		/// correct for windowed and windowless widgets alike.
-		/// </remarks>
 		PointF ScreenOrigin()
 		{
-			var toplevel = EventControl.Toplevel;
+			var control = EventControl;
+			// Buttons report mouse coordinates relative to their input window.
+			if (control is Gtk.Button && control.GetWindow() is Gdk.Window eventWindow)
+			{
+				eventWindow.GetOrigin(out var eventX, out var eventY);
+				return new PointF(eventX, eventY);
+			}
 
-			// A realized widget always sits under a realized toplevel, so an unrealized toplevel is the one
-			// case where nothing at all is known about where this widget is.
+			var toplevel = control.Toplevel;
 			if (!(toplevel?.GetWindow() is Gdk.Window toplevelWindow))
 				return PointF.Empty;
 
 			toplevelWindow.GetOrigin(out var originX, out var originY);
 
-			// Translating fails while the widget itself is unrealized — a notebook page's children are only
-			// realized once that page has been shown. The toplevel's own origin is then the closest honest
-			// answer: unlike reporting nothing, it does not put an unplaced widget at the screen's corner,
-			// where a hit test would find it under points that are nowhere near it.
-			if (EventControl.TranslateCoordinates(toplevel, 0, 0, out var offsetX, out var offsetY))
+			// A windowless widget's native window omits its allocation offset.
+			if (control.TranslateCoordinates(toplevel, 0, 0, out var offsetX, out var offsetY))
 				return new PointF(originX + offsetX, originY + offsetY);
 
+			// Until realization, only the toplevel origin is available.
 			return new PointF(originX, originY);
 		}
 

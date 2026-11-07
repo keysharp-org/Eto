@@ -43,22 +43,24 @@ namespace Eto.GtkSharp.Forms.Controls
 					return;
 
 				toggling = true;
-				// Only a click reaches this: the Checked setter detaches this handler while it drives the
-				// widget, so the cycle below - which advances a three-state box by one, as a click should -
-				// never sees an assignment it would advance past.
-				if (h.ThreeState)
+				try
 				{
-					if (!c.Inconsistent && c.Active)
-						c.Inconsistent = true;
-					else if (c.Inconsistent)
+					if (h.ThreeState)
 					{
-						c.Inconsistent = false;
-						c.Active = true;
+						if (!c.Inconsistent && c.Active)
+							c.Inconsistent = true;
+						else if (c.Inconsistent)
+						{
+							c.Inconsistent = false;
+							c.Active = true;
+						}
 					}
+					h.Callback.OnCheckedChanged(h.Widget, EventArgs.Empty);
 				}
-				h.Callback.OnCheckedChanged(h.Widget, EventArgs.Empty);
-				toggling = false;
-
+				finally
+				{
+					toggling = false;
+				}
 			}
 		}
 
@@ -81,11 +83,7 @@ namespace Eto.GtkSharp.Forms.Controls
 			get { return Control.Inconsistent ? null : (bool?)Control.Active; }
 			set
 			{
-				// gtk_toggle_button_set_active raises Toggled exactly as a click does, and the handler cannot
-				// tell the two apart: left connected it would run the three-state cycle over this assignment
-				// and advance past the state being set. Stop listening rather than try to recognise our own
-				// echo - which also means this setter reports its own change, instead of relying on the click
-				// handler to notice it went past (gtk raises nothing at all when only Inconsistent changes).
+				// GTK raises Toggled for assignments too; only clicks should advance the three-state cycle.
 				var oldValue = Checked;
 
 				Control.Toggled -= Connector.HandleToggled;
