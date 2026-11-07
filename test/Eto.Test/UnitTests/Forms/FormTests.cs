@@ -12,7 +12,6 @@ public class FormTests : WindowTests<Form>
 	[Test]
 	public void DisposingWithoutClosingShouldLeaveApplicationWindows()
 	{
-		// Quit stops the loop once no listed window is loaded, and a disposed window cannot be closed to get it off the list.
 		var listedWhileShown = false;
 		var listedAfterDispose = true;
 		Run((app, finished) =>

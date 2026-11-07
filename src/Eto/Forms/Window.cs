@@ -697,7 +697,7 @@ public abstract class Window : Panel
 	/// <inheritdoc/>
 	protected override void Dispose(bool disposing)
 	{
-		// Quit stops the loop once no listed window is loaded, and a disposed window stays loaded because Close returns early for it.
+		// Quit takes a listed window that stays loaded after Close as a veto, and a disposed window stays loaded because Close returns early for it.
 		if (disposing)
 			Application.Instance?.RemoveWindow(this);
 		base.Dispose(disposing);

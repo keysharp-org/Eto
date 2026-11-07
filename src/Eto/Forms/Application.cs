@@ -255,7 +255,6 @@ public class Application : Widget
 
 	void HandleClosed(object sender, EventArgs e) => RemoveWindow((Window)sender);
 
-	// A disposed window can no longer close, so it leaves the list here instead.
 	internal void RemoveWindow(Window window)
 	{
 		window.Closed -= HandleClosed;
@@ -433,7 +432,14 @@ public class Application : Widget
 			startup();
 		}
 		Initialized += OnStartup;
-		Handler.Run();
+		try
+		{
+			Handler.Run();
+		}
+		finally
+		{
+			Initialized -= OnStartup;
+		}
 	}
 
 	/// <summary>

@@ -258,9 +258,26 @@ public class ApplicationHandler : WidgetHandler<sw.Application, Application, App
 
 	public void RunIteration()
 	{
-		var frame = new DispatcherFrame();
-		Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new DispatcherOperationCallback(ExitFrame), frame);
-		Dispatcher.PushFrame(frame);
+		// Exiting a DispatcherFrame posts another wake, which would keep a later timed iteration from waiting.
+		var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency / 10;
+		while (Stopwatch.GetTimestamp() < deadline)
+		{
+			if (!Win32.PeekMessage(out swin.MSG message, IntPtr.Zero, 0, 0, Win32.PM_REMOVE))
+			{
+				swin.ComponentDispatcher.RaiseIdle();
+				break;
+			}
+			if (message.message == (int)Win32.WM.QUIT)
+			{
+				Win32.PostQuitMessage(message.wParam.ToInt32());
+				break;
+			}
+			if (!swin.ComponentDispatcher.RaiseThreadMessage(ref message))
+			{
+				Win32.TranslateMessage(ref message);
+				Win32.DispatchMessage(ref message);
+			}
+		}
 		WpfFrameworkElementHelper.ShouldCaptureMouse = false;
 	}
 
@@ -268,12 +285,6 @@ public class ApplicationHandler : WidgetHandler<sw.Application, Application, App
 	{
 		Win32.WaitForMessage(millisecondsTimeout);
 		RunIteration();
-	}
-
-	static object ExitFrame(object f)
-	{
-		((DispatcherFrame)f).Continue = false;
-		return null;
 	}
 
 	public void Quit()

@@ -300,6 +300,15 @@ Android, Direct2D). Solution: `src/Eto.slnx`.
   when the renderers report 0) and feeds it into `EtoScrolledWindow.OnGetPreferredHeight` so both
   direct and in-container measurements are correct.
 
+## Upstream PR descriptions
+
+The maintainer wants descriptions to state the problem, the situation or steps that
+cause it, what should happen, what happens instead, and then how the change fixes it.
+Lead with observable application behavior in plain language. Give concrete platform
+conditions and a small reproduction when practical; explain protocol names and code
+details afterward. Keep validation concise and distinguish a private fixture from a
+real desktop/compositor run. See the [maintainer's feedback](https://github.com/picoe/Eto/pull/3146#issuecomment-6515620354).
+
 ## Code style
 
 - **C# (`*.cs`) uses tabs, indent size 4** (per `.editorconfig`). Project/props files

@@ -391,9 +391,17 @@ namespace Eto.GtkSharp.Forms
 
 		public void Quit()
 		{
+			// The main form goes last, as closing it raises Terminating and ends the loop whatever the other windows decide.
+			foreach (var window in Widget.Windows.Where(w => !ReferenceEquals(w, Widget.MainForm)).ToList())
+			{
+				window.Close();
+				if (window.Loaded)
+					return;
+			}
+
 			var args = new CancelEventArgs();
 			// An earlier Run can leave its closed main form assigned, or the form may never have been shown.
-			var mainForm = Widget.MainForm is { Loaded: true } form ? form.Handler as IGtkWindow : null;
+			var mainForm = Widget.MainForm is { IsDisposed: false, Loaded: true } form ? form.Handler as IGtkWindow : null;
 			if (mainForm != null)
 				args.Cancel = !mainForm.CloseWindow(ce => Callback.OnTerminating(Widget, ce));
 			else
@@ -401,13 +409,10 @@ namespace Eto.GtkSharp.Forms
 
 			if (!args.Cancel)
 			{
-				foreach (var window in Widget.Windows.Where(w => !ReferenceEquals(w, Widget.MainForm)).ToList())
-					window.Close();
-				// CloseWindow only raises the events. Removing it after the others keeps them from seeing themselves as the last window.
-				mainForm?.Control.Hide();
-				mainForm?.Control.Unrealize();
-				if (!Widget.Windows.Any(window => window.Loaded))
-					Stop();
+				// CloseWindow only raises the events.
+				mainForm?.Control?.Hide();
+				mainForm?.Control?.Unrealize();
+				Stop();
 			}
 		}
 

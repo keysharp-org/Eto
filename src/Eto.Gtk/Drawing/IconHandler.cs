@@ -15,13 +15,13 @@ namespace Eto.GtkSharp.Drawing
 			using (var ms = new MemoryStream())
 			{
 				stream.CopyTo(ms);
+				var bytes = ms.ToArray();
+				// Validate the directory now so a malformed file fails in the constructor.
+				ValidateDirectory(bytes);
 				ms.Position = 0;
 				Pixbuf = new Gdk.Pixbuf(ms);
 				Control = new Gtk.IconSet(Pixbuf);
-				var bytes = ms.ToArray();
 				// Window and tray icons use only the primary image, so the frames are split on first request.
-				// The directory is still checked here so a malformed file fails in the constructor.
-				ValidateDirectory(bytes);
 				_frames = new Lazy<List<IconFrame>>(() => GetFrames(bytes));
 			}
 		}

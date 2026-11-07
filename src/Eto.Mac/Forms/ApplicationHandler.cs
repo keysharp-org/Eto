@@ -9,6 +9,7 @@ namespace Eto.Mac.Forms
 		bool? _activateOnStartup;
 		bool _hasLaunched;
 		bool _stopRequested;
+		bool _wakePending;
 		ulong _invokesDispatched;
 
 		internal static bool QueueResizing { get; set; }
@@ -239,10 +240,10 @@ namespace Eto.Mac.Forms
 			}
 
 			// This pump may have dispatched the event that a stopped Run() is waiting for.
-			if (_stopRequested)
+			if (_wakePending)
 				PostWakeEvent();
 			// NextEvent can run Invoke/AsyncInvoke callbacks even when it returns no NSEvent.
-			return dispatched || _invokesDispatched != invokesDispatched || _stopRequested;
+			return dispatched || _invokesDispatched != invokesDispatched || _wakePending;
 		}
 
 		public void Attach(object context)
@@ -291,6 +292,7 @@ namespace Eto.Mac.Forms
 				if (!_stopRequested)
 					Control.Run();
 				_stopRequested = false;
+				_wakePending = false;
 			}
 			else
 				Initialize(Control.Delegate as NSApplicationDelegate);
@@ -315,9 +317,17 @@ namespace Eto.Mac.Forms
 				return;
 			}
 
+			// The main form goes last, as closing it raises Terminating and ends the loop whatever the other windows decide.
+			foreach (var window in Widget.Windows.Where(w => !ReferenceEquals(w, Widget.MainForm)).ToList())
+			{
+				window.Close();
+				if (window.Loaded)
+					return;
+			}
+
 			var args = new CancelEventArgs();
 			// An earlier Run can leave its closed main form assigned, or the form may never have been shown.
-			var mainForm = Widget.MainForm is { Loaded: true } form ? form.Handler as IMacWindow : null;
+			var mainForm = Widget.MainForm is { IsDisposed: false, Loaded: true } form ? form.Handler as IMacWindow : null;
 			if (mainForm != null)
 				args.Cancel = !mainForm.CloseWindow(ce => Callback.OnTerminating(Widget, ce));
 			else
@@ -328,14 +338,11 @@ namespace Eto.Mac.Forms
 				if (mainForm != null)
 				{
 					// CloseWindow only raises the events, and the window's own close then finds it unloaded.
-					(Widget.MainForm.ControlObject as NSWindow)?.Close();
+					mainForm.Control?.Close();
 					// AppDelegate would show the closed form again when a later Run activates.
 					Widget.MainForm = null;
 				}
-				foreach (var window in Widget.Windows.ToList())
-					window.Close();
-				if (!Widget.Windows.Any(window => window.Loaded))
-					Stop();
+				Stop();
 			}
 		}
 
@@ -358,6 +365,8 @@ namespace Eto.Mac.Forms
 			// NSApp.Stop sets a flag; PostEvent ensures the loop processes it immediately.
 			if (Control.Running)
 			{
+				// A loop that is not running has nothing to wake, and a pump that kept posting wakes for it would never wait.
+				_wakePending = true;
 				Control.Stop(Control);
 				PostWakeEvent();
 			}

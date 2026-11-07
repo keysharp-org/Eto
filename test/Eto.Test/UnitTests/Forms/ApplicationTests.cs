@@ -5,6 +5,59 @@ namespace Eto.Test.UnitTests.Forms;
 [TestFixture]
 public class ApplicationTests : TestBase
 {
+	[Test, InvokeOnUI]
+	public void FailedRunShouldReleaseItsStartupForm()
+	{
+		if (Platform.Instance.IsGtk)
+			Assert.Ignore("The GTK-specific fixture attaches without registering another native application.");
+		VerifyFailedRunReleasesStartupForm(Eto.Platform.Copy(Platform.Instance));
+	}
+
+	public static void VerifyFailedRunReleasesStartupForm(Platform platform)
+	{
+		using (platform.Context)
+		using (var app = new Application(platform).Attach())
+		using (var form = new Form())
+		{
+			var failure = new InvalidOperationException("Startup failed before the form was shown.");
+			EventHandler<EventArgs> failStartup = (_, _) => throw failure;
+			app.Initialized += failStartup;
+			Assert.That(Assert.Throws<InvalidOperationException>(() => app.Run(form)), Is.SameAs(failure));
+			app.Initialized -= failStartup;
+			app.Run();
+			Assert.That(app.MainForm, Is.Null, "A later Run must not reuse the failed Run's startup callback.");
+			Assert.That(form.Loaded, Is.False);
+		}
+	}
+
+	[Test, InvokeOnUI]
+	public void QuitShouldIgnoreDisposedMainForm()
+	{
+		if (!Platform.Instance.IsMac)
+			Assert.Ignore("macOS closes MainForm explicitly; GTK uses its own attached-application fixture.");
+		VerifyQuitIgnoresDisposedMainForm(Eto.Platform.Copy(Platform.Instance));
+	}
+
+	public static void VerifyQuitIgnoresDisposedMainForm(Platform platform)
+	{
+		using (platform.Context)
+		using (var app = new Application(platform).Attach())
+		{
+			var form = new Form();
+			app.MainForm = form;
+			form.Show();
+			form.Dispose();
+			var terminating = 0;
+			app.Terminating += (_, e) =>
+			{
+				terminating++;
+				e.Cancel = true;
+			};
+			Assert.DoesNotThrow(() => app.Quit());
+			Assert.That(terminating, Is.EqualTo(1));
+		}
+	}
+
 	const string LibGLib = "libglib-2.0.so.0";
 	sealed class DelayedSynchronizationContext : System.Threading.SynchronizationContext
 	{
