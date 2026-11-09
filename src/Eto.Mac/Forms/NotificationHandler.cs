@@ -68,8 +68,8 @@
 
 		public void Show(TrayIndicator indicator = null)
 		{
-			;
-			Control.UserInfo = NSDictionary.FromObjectsAndKeys(new NSObject[] { new NSString(ID), (NSString)UserData }, s_UserInfoKeys);
+			// UserInfo accepts property-list values, so omit absent data instead of storing NSNull.
+			Control.UserInfo = NSDictionary.FromObjectsAndKeys(new NSObject[] { new NSString(ID), (NSString)UserData }, s_UserInfoKeys, UserData == null ? 1 : 2);
 			NSUserNotificationCenter.DefaultUserNotificationCenter.DeliverNotification(Control);
 		}
 	}
