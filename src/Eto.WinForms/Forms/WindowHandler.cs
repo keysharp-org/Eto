@@ -660,6 +660,7 @@ namespace Eto.WinForms.Forms
 
 		// the style to restore when leaving full screen, or null when not full screen
 		WindowStyle? fullScreenWindowStyle;
+		Rectangle fullScreenRestoreBounds;
 		swf.FormWindowState fullScreenPreviousState;
 		bool changingFullScreen;
 		bool allowFullScreenToggle;
@@ -703,6 +704,7 @@ namespace Eto.WinForms.Forms
 			{
 				// a borderless window only covers the taskbar when it is maximized after removing the border
 				Control.WindowState = swf.FormWindowState.Normal;
+				fullScreenRestoreBounds = Widget.Bounds;
 				fullScreenWindowStyle = WindowStyle;
 				Control.FormBorderStyle = swf.FormBorderStyle.None;
 				Control.WindowState = swf.FormWindowState.Maximized;
@@ -755,6 +757,8 @@ namespace Eto.WinForms.Forms
 		{
 			get
 			{
+				if (fullScreenWindowStyle != null)
+					return fullScreenRestoreBounds;
 				if (WindowState == WindowState.Normal || Control.RestoreBounds.IsEmpty)
 					return Widget.Bounds;
 				return Control.RestoreBounds.ToEto();
