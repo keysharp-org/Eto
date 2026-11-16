@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <PropertyGroup Condition="$([MSBuild]::IsOsPlatform(OSX)) AND $(Configuration) == 'Release'">
-    <EnableDmgBuild>True</EnableDmgBuild>
+    <MacPackageFormats>dmg;pkg</MacPackageFormats>
     <EnableCodeSigning Condition="$(EnableCodeSignBuild) == 'True' AND $(TargetFramework.StartsWith('net4')) == 'False'">True</EnableCodeSigning>
     <EnableNotarization Condition="$(EnableNotarizationBuild) == 'True' AND $(TargetFramework.StartsWith('net4')) == 'False'">True</EnableNotarization>
   </PropertyGroup>
@@ -68,7 +68,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\TestContent.txt" />
-    <Content Include="TestIcon.icns" />
+    <Content Include="EtoIcon.icns" />
   </ItemGroup>
   <ItemGroup>
     <BundleResource Include="Assets\TestBundleResource.txt" />

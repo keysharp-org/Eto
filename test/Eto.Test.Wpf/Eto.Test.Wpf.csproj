@@ -4,7 +4,7 @@
     <TargetFrameworks>net10.0-windows;net48</TargetFrameworks>
     <OutputType>WinExe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <ApplicationIcon>TestIcon.ico</ApplicationIcon>
+    <ApplicationIcon>..\Eto.Test\Images\EtoIcon.ico</ApplicationIcon>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Prefer32Bit>false</Prefer32Bit>
     <UseWPF>true</UseWPF>
@@ -13,6 +13,11 @@
   
   <PropertyGroup>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <WindowsPackageFormats>msi;setup;msix</WindowsPackageFormats>
+    <WindowsPackageRuntimeIdentifiers>win-x64;win-arm64</WindowsPackageRuntimeIdentifiers>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(TargetFramework)'=='net48'">
@@ -30,10 +35,6 @@
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="WindowsFormsIntegration" />
-  </ItemGroup>
-  
-  <ItemGroup>
-    <Resource Include="TestIcon.ico" />
   </ItemGroup>
   
   <ItemGroup>
@@ -64,4 +65,5 @@
     <Service Include="{82A7F48D-3B50-4B1E-B82E-3ADA8210C358}" />
   </ItemGroup>
 
+  <Import Project="..\..\src\Shared\build\Windows.targets" />
 </Project>
