@@ -33,6 +33,19 @@ namespace Eto.GtkSharp.Forms.Controls
 
 		public override Gtk.Widget ContainerControl => ScrolledWindow;
 
+		// The tree covers the scrolled window, and a colored scrolled window paints its undershoot over the rows.
+		public override Gtk.Widget BackgroundControl => Control;
+
+		protected override void SetBackgroundColor(Color? color)
+		{
+			base.SetBackgroundColor(color);
+			// The color applies in every state, which would leave selected rows looking unselected.
+			if (color != null)
+				Control.SetBackground(SystemColors.Highlight, GtkStateFlags.Selected);
+			else
+				Control.ClearBackground(GtkStateFlags.Selected);
+		}
+
 		public override bool ShouldTranslatePoints => true;
 
 
