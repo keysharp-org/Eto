@@ -10,13 +10,41 @@ namespace Eto.Test.Gtk.UnitTests
 	public class GroupBoxTests : TestBase
 	{
 		[Test]
+		public void TitlesShouldProcessMnemonics()
+		{
+			Invoke(() =>
+			{
+				using var groupBox = new GroupBox();
+				var frame = (g.Frame)groupBox.ControlObject;
+				foreach (var (title, displayed) in new (string, string)[]
+				{
+					("First && second", "First & second"),
+					("&First && second", "First & second"),
+					("_First && &second_part", "_First & second_part"),
+					("&&&&", "&&"),
+					("", ""),
+					(null, null),
+					("Restored && label", "Restored & label")
+				})
+				{
+					groupBox.Text = title;
+					Assert.That(groupBox.Text, Is.EqualTo(title));
+					if (title == null)
+						Assert.That(frame.LabelWidget, Is.Null);
+					else
+						Assert.That(((g.Label)frame.LabelWidget).Text, Is.EqualTo(displayed));
+				}
+			});
+		}
+
+		[Test]
 		public void TitleChangesShouldPreserveAssignedStyles()
 		{
 			Invoke(() =>
 			{
 				using var font = new Font(FontFamilies.Sans, 17, FontStyle.Bold);
 				using var groupBox = new GroupBox { Font = font, TextColor = Colors.Red };
-				foreach (var title in new[] { "Title", "Renamed" })
+				foreach (var title in new[] { "&Title && text", "Re&named && text" })
 				{
 					groupBox.Text = title;
 					AssertLabelStyle(groupBox, font, Colors.Red);
